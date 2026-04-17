@@ -48,14 +48,21 @@ class LocalMcpServerCatalog:
             "servers": [server.__dict__ for server in servers],
         }
 
+    def get(self, name: str) -> McpServerDefinition | None:
+        normalized = self._normalize_name(name)
+        for server in self.list_servers():
+            if server.name == normalized:
+                return server
+        return None
+
     def _python_definition(self, server_dir: Path, server_file: Path) -> McpServerDefinition:
         readme = server_dir / "README.md"
         return McpServerDefinition(
             name=self._normalize_name(server_dir.name),
             kind="python",
-            path=str(server_dir),
+            path=str(server_dir.resolve()),
             command=sys.executable,
-            args=[str(server_file)],
+            args=[str(server_file.resolve())],
             has_pyproject=(server_dir / "pyproject.toml").exists(),
             has_requirements=(server_dir / "requirements.txt").exists(),
             package_name=None,
@@ -80,8 +87,8 @@ class LocalMcpServerCatalog:
         return McpServerDefinition(
             name="power_bi",
             kind="npm",
-            path=str(server_dir),
-            command=str(executable_path),
+            path=str(server_dir.resolve()),
+            command=str(executable_path.resolve()),
             args=["--start"],
             has_pyproject=False,
             has_requirements=False,
@@ -104,4 +111,6 @@ class LocalMcpServerCatalog:
         value = value.replace("-", "_")
         if value in {"postgressql", "postgresql"}:
             return "postgresql"
+        if value in {"powerbi", "power_bi", "powerbi_modeling", "powerbi_modeling_mcp"}:
+            return "power_bi"
         return value

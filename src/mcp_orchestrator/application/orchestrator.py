@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from mcp_orchestrator.config import Settings
 from mcp_orchestrator.domain.models import NormalizedResponse, OrchestrateRequest
+from mcp_orchestrator.domain.models import McpToolCallResponse, McpToolDefinition
 from mcp_orchestrator.domain.ports import (
     ContextComposer,
     RagRetriever,
@@ -11,7 +12,7 @@ from mcp_orchestrator.domain.ports import (
     ResponseNormalizer,
 )
 from mcp_orchestrator.infrastructure.mcp_clients import DefaultMcpClientRegistry
-from mcp_orchestrator.infrastructure.mcp_servers import LocalMcpServerCatalog
+from mcp_orchestrator.infrastructure.mcp_servers import LocalMcpServerCatalog, StdioMcpToolRunner
 from mcp_orchestrator.infrastructure.rag import TextualRagRetriever
 from mcp_orchestrator.normalization import DefaultResponseNormalizer
 from mcp_orchestrator.observability import TimingRecorder, get_logger, log_stage
@@ -31,6 +32,7 @@ class OrchestrationService:
         router: McpRouter,
         normalizer: ResponseNormalizer,
         server_catalog: LocalMcpServerCatalog,
+        tool_runner: StdioMcpToolRunner,
         rag_top_k: int,
     ) -> None:
         self.interpreter = interpreter
@@ -39,6 +41,7 @@ class OrchestrationService:
         self.router = router
         self.normalizer = normalizer
         self.server_catalog = server_catalog
+        self.tool_runner = tool_runner
         self.rag_top_k = rag_top_k
         self.logger = get_logger(__name__)
 
@@ -92,6 +95,23 @@ class OrchestrationService:
     def mcp_servers_status(self) -> dict[str, object]:
         return self.server_catalog.status()
 
+    async def list_mcp_tools(self, server_name: str) -> list[McpToolDefinition]:
+        server = self.server_catalog.get(server_name)
+        if not server:
+            raise ValueError(f"MCP server not found: {server_name}")
+        return await self.tool_runner.list_tools(server)
+
+    async def call_mcp_tool(
+        self,
+        server_name: str,
+        tool_name: str,
+        arguments: dict[str, object],
+    ) -> McpToolCallResponse:
+        server = self.server_catalog.get(server_name)
+        if not server:
+            raise ValueError(f"MCP server not found: {server_name}")
+        return await self.tool_runner.call_tool(server, tool_name, arguments)
+
     def _rag_filters(
         self,
         request: OrchestrateRequest,
@@ -137,5 +157,6 @@ def create_orchestration_service(settings: Settings | None = None) -> Orchestrat
         router=router,
         normalizer=DefaultResponseNormalizer(),
         server_catalog=server_catalog,
+        tool_runner=StdioMcpToolRunner(),
         rag_top_k=settings.rag_top_k,
     )

@@ -76,3 +76,22 @@ class NormalizedResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
     timings: dict[str, float] = Field(default_factory=dict)
+
+
+class McpToolDefinition(BaseModel):
+    name: str
+    description: str | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpToolCallRequest(BaseModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpToolCallResponse(BaseModel):
+    server_name: str
+    tool_name: str
+    is_error: bool
+    content: list[str] = Field(default_factory=list)
+    structured_content: dict[str, Any] | list[Any] | None = None
+    raw_result: dict[str, Any] = Field(default_factory=dict)

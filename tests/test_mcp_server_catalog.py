@@ -29,6 +29,15 @@ def test_catalog_marks_power_bi_as_npm_server() -> None:
     assert "powerbi-modeling-mcp" in power_bi["command"]
 
 
+def test_catalog_accepts_powerbi_alias() -> None:
+    catalog = LocalMcpServerCatalog(Path("mcps"))
+
+    server = catalog.get("powerbi")
+
+    assert server is not None
+    assert server.name == "power_bi"
+
+
 def test_api_exposes_mcp_servers_status() -> None:
     client = TestClient(create_app(Settings()))
 

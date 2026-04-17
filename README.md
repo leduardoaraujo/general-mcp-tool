@@ -135,6 +135,8 @@ Servidor padrao: `http://127.0.0.1:8000`
 - `GET /docs-index/status`
 - `POST /docs-index/rebuild`
 - `GET /mcp-servers/status`
+- `GET /mcp-servers/{server_name}/tools`
+- `POST /mcp-servers/{server_name}/tools/{tool_name}`
 
 ### Exemplo de request
 
@@ -200,6 +202,31 @@ Para ver quais servidores locais foram descobertos:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/mcp-servers/status
 ```
+
+Para listar tools de um MCP filho via stdio:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/mcp-servers/postgresql/tools
+```
+
+Para chamar uma tool:
+
+```powershell
+$body = @{
+  arguments = @{
+    schema_name = "public"
+  }
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8000/mcp-servers/postgresql/tools/pg_list_tables" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+O Postgres MCP precisa de variaveis de ambiente como `POSTGRES_DSN` ou
+`POSTGRES_DB_1_NAME`/`POSTGRES_DB_1_DSN`. Sem credenciais, o principal consegue
+descobrir o servidor, mas a chamada real de tool pode falhar com erro controlado.
 
 ## Testes
 
