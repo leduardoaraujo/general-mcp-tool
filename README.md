@@ -6,9 +6,38 @@ Modulo Python para baixar, verificar e atualizar o pacote npm
 O pacote MCP e instalado em `.managed/powerbi-modeling-mcp`, e o cache do npm
 fica em `.npm-cache`. As duas pastas sao ignoradas pelo Git.
 
+## MCP Orchestrator
+
+O projeto tambem inclui um MVP de MCP Orchestrator em `src/mcp_orchestrator`.
+
+Ele expoe uma API FastAPI que recebe pedidos do usuario, interpreta intencao e
+dominio, recupera contexto local em `docs/`, compoe uma request enriquecida,
+roteia para MCP clients mockados e retorna uma resposta normalizada.
+
+Rodar em desenvolvimento:
+
+```powershell
+python -m uvicorn mcp_orchestrator.main:app --app-dir src --reload
+```
+
+Endpoints iniciais:
+
+- `GET /health`
+- `POST /orchestrate`
+- `GET /docs-index/status`
+- `POST /docs-index/rebuild`
+
+Exemplo de payload:
+
+```json
+{
+  "message": "Show Total Sales from the Power BI semantic model"
+}
+```
+
 ## Requisitos
 
-- Python 3.10 ou superior
+- Python 3.11 ou superior
 - Node.js/npm disponivel no PATH
 - Acesso ao registro npm
 
