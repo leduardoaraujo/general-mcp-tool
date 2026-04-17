@@ -11,6 +11,7 @@ from mcp_orchestrator.domain.ports import (
     ResponseNormalizer,
 )
 from mcp_orchestrator.infrastructure.mcp_clients import DefaultMcpClientRegistry
+from mcp_orchestrator.infrastructure.mcp_servers import LocalMcpServerCatalog
 from mcp_orchestrator.infrastructure.rag import TextualRagRetriever
 from mcp_orchestrator.normalization import DefaultResponseNormalizer
 from mcp_orchestrator.observability import TimingRecorder, get_logger, log_stage
@@ -29,6 +30,7 @@ class OrchestrationService:
         composer: ContextComposer,
         router: McpRouter,
         normalizer: ResponseNormalizer,
+        server_catalog: LocalMcpServerCatalog,
         rag_top_k: int,
     ) -> None:
         self.interpreter = interpreter
@@ -36,6 +38,7 @@ class OrchestrationService:
         self.composer = composer
         self.router = router
         self.normalizer = normalizer
+        self.server_catalog = server_catalog
         self.rag_top_k = rag_top_k
         self.logger = get_logger(__name__)
 
@@ -86,6 +89,9 @@ class OrchestrationService:
         self.retriever.rebuild()
         return self.retriever.status()
 
+    def mcp_servers_status(self) -> dict[str, object]:
+        return self.server_catalog.status()
+
     def _rag_filters(
         self,
         request: OrchestrateRequest,
@@ -123,11 +129,13 @@ def create_orchestration_service(settings: Settings | None = None) -> Orchestrat
         settings.resolved_docs_dir(),
         chunk_size=settings.rag_chunk_size,
     )
+    server_catalog = LocalMcpServerCatalog(settings.resolved_mcps_dir())
     return OrchestrationService(
         interpreter=HeuristicRequestInterpreter(),
         retriever=retriever,
         composer=DefaultContextComposer(),
         router=router,
         normalizer=DefaultResponseNormalizer(),
+        server_catalog=server_catalog,
         rag_top_k=settings.rag_top_k,
     )

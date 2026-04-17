@@ -1,0 +1,9 @@
+asyncpg>=0.31.0
+pydantic>=2.12.0
+python-dotenv>=1.2.0
+mcp>=1.26.0
+sqlglot>=27.10.0
+
+# Dependências opcionais para RAG (instale se desejar busca semântica avançada)
+# sentence-transformers>=3.0.0
+# numpy>=1.24.0

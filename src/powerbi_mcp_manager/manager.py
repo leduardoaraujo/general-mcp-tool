@@ -10,6 +10,7 @@ from typing import Any
 
 DEFAULT_PACKAGE_NAME = "@microsoft/powerbi-modeling-mcp"
 DEFAULT_TAG = "latest"
+DEFAULT_MANAGED_DIR = "mcps/powerbi-modeling-mcp"
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ class PowerBiMcpManager:
         self.managed_dir = self._resolve_dir(
             managed_dir
             or os.getenv("POWERBI_MCP_DIR")
-            or ".managed/powerbi-modeling-mcp"
+            or DEFAULT_MANAGED_DIR
         )
         self.npm_cache_dir = self._resolve_dir(
             npm_cache_dir or os.getenv("POWERBI_MCP_NPM_CACHE") or ".npm-cache"

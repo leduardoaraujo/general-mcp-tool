@@ -1,0 +1,9 @@
+{
+  "name": "managed-powerbi-modeling-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generated local install area for @microsoft/powerbi-modeling-mcp.",
+  "dependencies": {
+    "@microsoft/powerbi-modeling-mcp": "0.5.0-beta.3"
+  }
+}

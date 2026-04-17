@@ -25,4 +25,8 @@ def create_api_router(service: OrchestrationService) -> APIRouter:
     async def rebuild_docs_index() -> dict[str, object]:
         return service.rebuild_docs_index()
 
+    @router.get("/mcp-servers/status")
+    async def mcp_servers_status() -> dict[str, object]:
+        return service.mcp_servers_status()
+
     return router

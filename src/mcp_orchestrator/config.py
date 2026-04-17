@@ -9,6 +9,7 @@ from pathlib import Path
 class Settings:
     project_dir: Path = Path.cwd()
     docs_dir: Path | None = None
+    mcps_dir: Path | None = None
     rag_chunk_size: int = 900
     rag_top_k: int = 5
 
@@ -22,3 +23,11 @@ class Settings:
         if self.docs_dir:
             return self.docs_dir.resolve()
         return self.resolved_project_dir() / "docs"
+
+    def resolved_mcps_dir(self) -> Path:
+        configured = os.getenv("MCP_ORCHESTRATOR_MCPS_DIR")
+        if configured:
+            return Path(configured).resolve()
+        if self.mcps_dir:
+            return self.mcps_dir.resolve()
+        return self.resolved_project_dir() / "mcps"

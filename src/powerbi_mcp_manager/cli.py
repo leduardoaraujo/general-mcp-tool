@@ -14,7 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--project-dir",
-        help="Base folder used for .managed and .npm-cache. Defaults to the current folder.",
+        help="Base folder used for mcps and .npm-cache. Defaults to the current folder.",
     )
     parser.add_argument(
         "--package",

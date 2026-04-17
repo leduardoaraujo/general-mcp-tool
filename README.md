@@ -37,7 +37,7 @@ python -m pip install -e .[dev]
 
 Responsavel por instalar o pacote npm em area local do projeto.
 
-- pasta de instalacao padrao: `.managed/powerbi-modeling-mcp`
+- pasta de instalacao padrao: `mcps/powerbi-modeling-mcp`
 - cache npm padrao: `.npm-cache`
 
 ### Comandos CLI
@@ -134,6 +134,7 @@ Servidor padrao: `http://127.0.0.1:8000`
 - `POST /orchestrate`
 - `GET /docs-index/status`
 - `POST /docs-index/rebuild`
+- `GET /mcp-servers/status`
 
 ### Exemplo de request
 
@@ -166,8 +167,39 @@ Invoke-RestMethod -Method Post `
 
 - `MCP_ORCHESTRATOR_PROJECT_DIR`: pasta base do projeto para resolucao de caminhos.
 - `MCP_ORCHESTRATOR_DOCS_DIR`: pasta de documentos para indexacao RAG.
+- `MCP_ORCHESTRATOR_MCPS_DIR`: pasta de servidores MCP locais.
 
 Se `MCP_ORCHESTRATOR_DOCS_DIR` nao for definido, o padrao e `<project_dir>/docs`.
+Se `MCP_ORCHESTRATOR_MCPS_DIR` nao for definido, o padrao e `<project_dir>/mcps`.
+
+### Pasta `mcps/`
+
+Servidores MCP especializados podem ficar em `mcps/`, cada um em sua propria
+pasta, com um `server.py` como ponto de entrada.
+
+Exemplo:
+
+```text
+mcps/
+  powerbi-modeling-mcp/
+    package.json
+    package-lock.json
+    node_modules/
+  postgressql-mcp-master/
+    server.py
+    pyproject.toml
+    requirements.txt
+```
+
+O orchestrator nao importa o codigo desses servidores diretamente. Servidores
+Python sao tratados como processos `python server.py`; servidores npm, como o
+Power BI Modeling MCP, sao tratados pelo binario instalado em `node_modules/.bin`.
+
+Para ver quais servidores locais foram descobertos:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/mcp-servers/status
+```
 
 ## Testes
 
@@ -188,3 +220,4 @@ pytest
 
 - O estado do pacote gerenciado pode ser: `not-installed`, `up-to-date` ou `update-available`.
 - O endpoint `POST /docs-index/rebuild` permite reconstruir o indice de documentos sem reiniciar a API.
+- O endpoint `GET /mcp-servers/status` lista servidores MCP locais descobertos em `mcps/`.
