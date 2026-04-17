@@ -98,6 +98,16 @@ class LocalMcpServerCatalog:
         )
 
     def _powerbi_executable(self, server_dir: Path) -> Path:
+        direct_executable = (
+            server_dir
+            / "node_modules"
+            / "@microsoft"
+            / "powerbi-modeling-mcp-win32-x64"
+            / "dist"
+            / "powerbi-modeling-mcp.exe"
+        )
+        if sys.platform == "win32" and direct_executable.exists():
+            return direct_executable
         if sys.platform == "win32":
             return server_dir / "node_modules" / ".bin" / "powerbi-modeling-mcp.cmd"
         return server_dir / "node_modules" / ".bin" / "powerbi-modeling-mcp"

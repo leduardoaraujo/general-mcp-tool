@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 from mcp import ClientSession
@@ -80,17 +82,31 @@ class _ClientSessionContext:
         self.params = params
         self._stdio_context = None
         self._session_context = None
+        self._errlog = None
 
     async def __aenter__(self) -> ClientSession:
-        self._stdio_context = stdio_client(self.params)
+        self._errlog = self._open_errlog()
+        self._stdio_context = stdio_client(self.params, errlog=self._errlog)
         read_stream, write_stream = await self._stdio_context.__aenter__()
         self._session_context = ClientSession(read_stream, write_stream)
         session = await self._session_context.__aenter__()
         await session.initialize()
         return session
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if self._session_context is not None:
             await self._session_context.__aexit__(exc_type, exc, tb)
         if self._stdio_context is not None:
             await self._stdio_context.__aexit__(exc_type, exc, tb)
+        if self._errlog is not None and self._errlog is not os.sys.stderr:
+            self._errlog.close()
+
+    def _open_errlog(self):
+        if os.getenv("MCP_ORCHESTRATOR_CHILD_LOGS", "").lower() in {"1", "true", "yes"}:
+            return os.sys.stderr
+        return open(os.devnull, "w", encoding="utf-8")
