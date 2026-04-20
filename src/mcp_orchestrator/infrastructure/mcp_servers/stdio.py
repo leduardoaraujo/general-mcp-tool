@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -45,6 +45,35 @@ class StdioMcpToolRunner:
                 structured_content=getattr(result, "structuredContent", None),
                 raw_result=self._dump(result),
             )
+
+    async def call_tools(
+        self,
+        server: McpServerDefinition,
+        calls: list[tuple[str, dict[str, Any] | None]],
+    ) -> list[McpToolCallResponse]:
+        responses: list[McpToolCallResponse] = []
+        async with self._session(server) as session:
+            for tool_name, arguments in calls:
+                result = await session.call_tool(tool_name, arguments or {})
+                responses.append(
+                    McpToolCallResponse(
+                        server_name=server.name,
+                        tool_name=tool_name,
+                        is_error=bool(getattr(result, "isError", False)),
+                        content=self._content_text(result),
+                        structured_content=getattr(result, "structuredContent", None),
+                        raw_result=self._dump(result),
+                    )
+                )
+        return responses
+
+    async def call_with_session(
+        self,
+        server: McpServerDefinition,
+        callback: Callable[["_SessionToolCaller"], Awaitable[McpToolCallResponse]],
+    ) -> McpToolCallResponse:
+        async with self._session(server) as session:
+            return await callback(_SessionToolCaller(server, session, self))
 
     def _session(self, server: McpServerDefinition):
         params = StdioServerParameters(
@@ -110,3 +139,30 @@ class _ClientSessionContext:
         if os.getenv("MCP_ORCHESTRATOR_CHILD_LOGS", "").lower() in {"1", "true", "yes"}:
             return os.sys.stderr
         return open(os.devnull, "w", encoding="utf-8")
+
+
+class _SessionToolCaller:
+    def __init__(
+        self,
+        server: McpServerDefinition,
+        session: ClientSession,
+        runner: StdioMcpToolRunner,
+    ) -> None:
+        self.server = server
+        self.session = session
+        self.runner = runner
+
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> McpToolCallResponse:
+        result = await self.session.call_tool(tool_name, arguments or {})
+        return McpToolCallResponse(
+            server_name=self.server.name,
+            tool_name=tool_name,
+            is_error=bool(getattr(result, "isError", False)),
+            content=self.runner._content_text(result),
+            structured_content=getattr(result, "structuredContent", None),
+            raw_result=self.runner._dump(result),
+        )

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from mcp_orchestrator.application import (
@@ -60,6 +62,86 @@ class FakeRunner:
             else {"code": "failed"},
             raw_result={"transport": "stdio"},
         )
+
+
+class FakeSessionCaller:
+    def __init__(self, calls: list[tuple[str, dict[str, object]]]) -> None:
+        self.calls = calls
+
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, object],
+    ) -> McpToolCallResponse:
+        self.calls.append((tool_name, arguments))
+        request = arguments["request"]  # type: ignore[index]
+        operation = request["operation"]  # type: ignore[index]
+
+        payloads = {
+            ("connection_operations", "ListLocalInstances"): {
+                "success": True,
+                "operation": "ListLocalInstances",
+                "data": [
+                    {
+                        "connectionString": "Data Source=localhost:58211",
+                        "parentWindowTitle": "Planejamentov12",
+                    }
+                ],
+            },
+            ("connection_operations", "Connect"): {
+                "success": True,
+                "operation": "Connect",
+                "data": "PBIDesktop-Planejamentov12-58211",
+            },
+            ("measure_operations", "List"): {
+                "success": True,
+                "operation": "List",
+                "data": [
+                    {"name": "Custo Unitário Prato"},
+                    {"name": "Custo Unitário do Prato (KPI)"},
+                    {"name": "Total Custo"},
+                ],
+            },
+            ("measure_operations", "Get"): {
+                "success": True,
+                "operation": "Get",
+                "results": [
+                    {
+                        "success": True,
+                        "data": {
+                            "tableName": "Medidas",
+                            "name": "Custo Unitário Prato",
+                            "expression": "DIVIDE([Custo Realizado], [Porções Prato])",
+                        },
+                    }
+                ],
+            },
+        }
+        payload = payloads[(tool_name, operation)]
+        return McpToolCallResponse(
+            server_name="power_bi",
+            tool_name=tool_name,
+            is_error=False,
+            content=[json.dumps(payload)],
+            structured_content=None,
+            raw_result={"payload": payload},
+        )
+
+
+class FakeSessionRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def call_with_session(self, server, callback):  # noqa: ANN001
+        return await callback(FakeSessionCaller(self.calls))
+
+    async def call_tool(
+        self,
+        server: McpServerDefinition,
+        tool_name: str,
+        arguments: dict[str, object],
+    ) -> McpToolCallResponse:
+        raise AssertionError("guided Power BI execution should use one stdio session")
 
 
 def build_power_bi_specialist_request(
@@ -156,6 +238,32 @@ async def test_power_bi_client_calls_guided_modeling_request() -> None:
         "preview_only": True,
     }
     assert result.debug["raw_result"] == {"transport": "stdio"}
+
+
+@pytest.mark.asyncio
+async def test_power_bi_client_guided_request_uses_real_power_bi_tools_in_one_session() -> None:
+    runner = FakeSessionRunner()
+    client = PowerBiMcpClient(
+        server_catalog=FakeCatalog(),
+        tool_runner=runner,
+    )  # type: ignore[arg-type]
+    request = build_power_bi_specialist_request(
+        message="qual a medida que mostra o custo unitario por prato?",
+    )
+
+    result = await client.execute(request)
+
+    assert result.status == ResultStatus.SUCCESS
+    assert [call[0] for call in runner.calls] == [
+        "connection_operations",
+        "connection_operations",
+        "measure_operations",
+        "measure_operations",
+    ]
+    assert "Custo Unitário Prato" in result.summary
+    assert "DIVIDE([Custo Realizado], [Porções Prato])" in result.summary
+    assert result.structured_data["connection"]["parentWindowTitle"] == "Planejamentov12"
+    assert result.structured_data["measure_definitions"][0]["name"] == "Custo Unitário Prato"
 
 
 @pytest.mark.asyncio

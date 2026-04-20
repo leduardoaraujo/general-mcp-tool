@@ -109,6 +109,68 @@ Default URL:
 http://127.0.0.1:8000
 ```
 
+## Run The MCP Client Proxy
+
+The MCP proxy is a lightweight stdio server for MCP clients. It does not start
+or embed the orchestrator; start the FastAPI service first:
+
+```powershell
+python -m uvicorn mcp_orchestrator.main:app --app-dir src --reload
+```
+
+Then configure the MCP client to run the proxy:
+
+```powershell
+mcp-orchestrator-proxy
+```
+
+The proxy calls the orchestrator API at `http://127.0.0.1:8000` by default.
+Override it when needed:
+
+```powershell
+$env:MCP_ORCHESTRATOR_API_URL = "http://127.0.0.1:8000"
+$env:MCP_ORCHESTRATOR_TIMEOUT_SECONDS = "60"
+mcp-orchestrator-proxy
+```
+
+Example MCP client stdio configuration:
+
+```json
+{
+  "mcpServers": {
+    "orquestra-mcp": {
+      "command": "mcp-orchestrator-proxy",
+      "args": [],
+      "env": {
+        "MCP_ORCHESTRATOR_API_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
+```
+
+If the package is not installed with entrypoints, use Python directly:
+
+```json
+{
+  "mcpServers": {
+    "orquestra-mcp": {
+      "command": "python",
+      "args": ["-m", "mcp_orchestrator.mcp_proxy"],
+      "env": {
+        "PYTHONPATH": "src",
+        "MCP_ORCHESTRATOR_API_URL": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
+```
+
+Proxy tools:
+
+- `ask_orchestrator`: sends a contextual request to `POST /orchestrate`.
+- `orchestrator_health`: checks `GET /health` and reports whether the API is reachable.
+
 ## API Endpoints
 
 - `GET /health`
