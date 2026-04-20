@@ -18,9 +18,13 @@ class DefaultExecutionPolicyService:
         action = enriched_request.understanding.requested_action
         write = action == RequestedAction.WRITE
         side_effects = self._has_side_effects(enriched_request)
-        read_only = action in {RequestedAction.READ, RequestedAction.INSPECT_SCHEMA}
+        read_only = action in {
+            RequestedAction.READ,
+            RequestedAction.INSPECT_SCHEMA,
+            RequestedAction.INSPECT_MODEL,
+        }
 
-        if write or side_effects:
+        if write or side_effects or action == RequestedAction.REFRESH:
             return self._blocked_decision(enriched_request, write=write, side_effects=side_effects)
 
         if read_only and allow_execution_requested:
@@ -49,7 +53,7 @@ class DefaultExecutionPolicyService:
             blocked_reason=None,
             safety_level=SafetyLevel.SAFE,
             risk_level=enriched_request.understanding.risk_level,
-            decision_reason="Preview-only execution is the Phase 1 default.",
+            decision_reason="Preview-only execution is the default policy.",
             warnings=warnings,
             trace=["Execution policy selected preview-only mode."],
         )

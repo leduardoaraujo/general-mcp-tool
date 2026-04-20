@@ -99,6 +99,14 @@ class McpClientCapability(BaseModel):
     supports_read: bool = False
     supports_write: bool = False
     supports_side_effects: bool = False
+    semantic_model_inspection: bool = False
+    table_listing: bool = False
+    measure_listing: bool = False
+    dax_support: bool = False
+    metadata_read: bool = False
+    refresh_support: bool = False
+    model_write_support: bool = False
+    side_effect_support: bool = False
     default_tool: str | None = None
     supported_tools: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

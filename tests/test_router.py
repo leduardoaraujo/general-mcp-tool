@@ -35,6 +35,37 @@ def test_semantic_model_routes_to_power_bi() -> None:
     assert trace
 
 
+def test_power_bi_request_builds_semantic_execution_plan() -> None:
+    router = ExecutionRouter(DefaultMcpClientRegistry())
+    enriched = build_enriched("List Power BI semantic model tables and measures")
+    policy = DefaultExecutionPolicyService().decide(
+        enriched,
+        OrchestrationTraceRecorder("test-correlation").trace,
+    )
+
+    plan = router.create_plan(enriched, policy)
+
+    assert plan.target_mcps == [McpTarget.POWER_BI]
+    assert plan.execution_mode == ExecutionMode.PREVIEW_ONLY
+    assert plan.tool_hints[McpTarget.POWER_BI] == "run_guided_modeling_request"
+
+
+@pytest.mark.asyncio
+async def test_power_bi_refresh_is_blocked_before_specialist_call() -> None:
+    router = ExecutionRouter(DefaultMcpClientRegistry())
+    enriched = build_enriched("Refresh the Power BI semantic model")
+    policy = DefaultExecutionPolicyService().decide(
+        enriched,
+        OrchestrationTraceRecorder("test-correlation").trace,
+    )
+    plan = router.create_plan(enriched, policy)
+
+    results = await router.execute_plan(enriched, plan)
+
+    assert results[0].mcp_name == "execution_policy"
+    assert results[0].status == ResultStatus.ERROR
+
+
 def test_excel_extraction_routes_to_excel() -> None:
     router = McpRouter(DefaultMcpClientRegistry())
 

@@ -6,7 +6,7 @@ O **MCP Orchestrator** evoluiu de uma arquitetura conceitual para uma fundação
 
 O sistema atua como um **middleware contextual de orquestração para servidores MCP especializados**. Ele não é um roteador simples. Antes de chamar qualquer MCP especialista, o orquestrador interpreta a solicitação, recupera contexto local, compõe uma requisição enriquecida, aplica governança de execução, cria um plano de execução e só então chama o cliente especialista adequado.
 
-Atualmente, PostgreSQL e SQL Server possuem adapters reais de clientes MCP por meio de `stdio`. O PostgreSQL MCP está presente no repositório; o SQL Server MCP depende de um servidor local futuro em `mcps/`.
+Atualmente, PostgreSQL, SQL Server e Power BI possuem adapters reais de clientes MCP por meio de `stdio`. O PostgreSQL MCP e o Power BI Modeling MCP estão presentes no repositório; o SQL Server MCP depende de um servidor local futuro em `mcps/`.
 
 ## Fluxo Atual da Orquestração
 
@@ -73,6 +73,18 @@ O objetivo da Fase 2 foi provar que os contratos de orquestração não são esp
 - bloqueio de escrita e efeitos colaterais antes da chamada ao MCP
 - detalhes de transporte isolados em `debug`
 
+### Fase 3 - Especialista Semântico Power BI
+
+A quarta etapa adicionou o Power BI como especialista MCP real para fluxos semânticos e de modelagem.
+
+O objetivo da Fase 3 foi provar que o orquestrador suporta workflows não relacionais sem redesenhar o núcleo:
+
+- inspeção de modelos semânticos
+- listagem de tabelas e medidas
+- preview ou geração segura de DAX
+- bloqueio padrão de refresh, escrita de modelo e efeitos colaterais
+- transporte Power BI isolado nos campos `debug`
+
 ## Arquitetura Modular
 
 ```mermaid
@@ -89,7 +101,7 @@ flowchart LR
     ROUTER --> CLIENTS["Camada de Clientes MCP"]
     CLIENTS --> PG["PostgreSQL MCP<br/>integração real via stdio"]
     CLIENTS --> SQLS["SQL Server MCP<br/>adapter real via stdio"]
-    CLIENTS --> PBI["Power BI<br/>cliente futuro"]
+    CLIENTS --> PBI["Power BI MCP<br/>especialista semântico real via stdio"]
     CLIENTS --> EXCEL["Excel<br/>cliente futuro"]
 
     RETRIEVAL --> DOCS["docs/context"]
@@ -322,7 +334,7 @@ Cada cliente pode declarar:
 - suporte a efeitos colaterais
 - ferramenta padrão
 
-Isso prepara a arquitetura para futuros clientes reais de Power BI, SQL Server e Excel.
+Isso prepara a arquitetura para futuras expansões de Power BI, SQL Server, PostgreSQL e Excel sem alterar o núcleo de orquestração.
 
 ## Modelo de Segurança Atual
 
@@ -377,10 +389,10 @@ A suíte de testes cobre:
 - trace de orquestração
 - endpoints FastAPI
 
-Resultado atual após a Fase 2:
+Resultado atual após a Fase 3:
 
 ```text
-49 testes passando
+60 testes passando
 ```
 
 ## Commits Criados
@@ -390,6 +402,7 @@ Commits regulares foram criados durante a implementação:
 ```text
 9d254db Add execution governance foundation
 1a58a83 Document and test execution governance
+e7b00ff Add SQL Server relational MCP client
 ```
 
 ## Estado Atual do Projeto
@@ -400,13 +413,14 @@ O projeto agora possui:
 - fluxo tipado de ponta a ponta
 - integração real com PostgreSQL MCP
 - adapter real para SQL Server MCP via `stdio`
+- adapter real para Power BI MCP via `stdio`
 - recuperação de contexto local
 - governança explícita de execução
 - rastreabilidade tipada
 - modelo extensível de capacidades dos clientes MCP
 - testes cobrindo o comportamento central
 
-## Próximos Passos Para a Fase 2
+## Próximos Passos Para a Próxima Fase
 
 Próximos passos recomendados:
 
@@ -414,9 +428,9 @@ Próximos passos recomendados:
 2. Persistir traces e decisões de política em um storage auditável.
 3. Substituir o interpretador heurístico por um interpretador baseado em LLM.
 4. Adicionar o servidor SQL Server MCP local e validar integração fim a fim.
-5. Implementar um cliente real para Power BI MCP.
+5. Validar o Power BI MCP contra um modelo semântico real em Power BI Desktop, Fabric ou PBIP.
 6. Melhorar a recuperação local com embeddings.
 7. Adicionar logs estruturados e métricas mais ricas.
-8. Adicionar testes de integração controlados contra bancos PostgreSQL e SQL Server reais.
+8. Adicionar testes de integração controlados contra bancos PostgreSQL, SQL Server e modelos Power BI reais.
 
 A arquitetura central está pronta para essas adições sem reescrever o pipeline de orquestração.

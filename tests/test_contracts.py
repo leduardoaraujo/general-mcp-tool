@@ -69,6 +69,7 @@ def test_phase_zero_contracts_serialize_stable_fields() -> None:
         target=McpTarget.POSTGRESQL,
         supports_preview=True,
         supports_read=True,
+        metadata_read=True,
         default_tool="run_guided_query",
     )
     specialist_request = SpecialistExecutionRequest(
@@ -100,6 +101,8 @@ def test_phase_zero_contracts_serialize_stable_fields() -> None:
     assert enriched.model_dump()["understanding"]["requested_action"] == "generate_query"
     assert plan.model_dump()["policy_decision"]["preview_only"] is True
     assert capability.model_dump()["supports_read"] is True
+    assert capability.model_dump()["metadata_read"] is True
+    assert capability.model_dump()["semantic_model_inspection"] is False
     assert specialist_request.model_dump()["policy_decision"]["safety_level"] == "safe"
     assert specialist_request.model_dump()["tool_name"] == "run_guided_query"
     assert response.model_dump()["specialist_results"][0]["mcp_name"] == "postgresql"

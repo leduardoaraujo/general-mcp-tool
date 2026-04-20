@@ -30,7 +30,7 @@ class DefaultMcpClientRegistry:
         self._clients: list[BaseMCPClient] = [
             PostgreSqlMcpClient(server_catalog=server_catalog, tool_runner=tool_runner),
             SqlServerMcpClient(server_catalog=server_catalog, tool_runner=tool_runner),
-            PowerBiMcpClient(),
+            PowerBiMcpClient(server_catalog=server_catalog, tool_runner=tool_runner),
             ExcelMcpClient(),
         ]
 

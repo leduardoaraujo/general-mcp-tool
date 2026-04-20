@@ -16,6 +16,42 @@ def test_power_bi_request_selects_power_bi() -> None:
     assert result.reasoning_summary
 
 
+def test_power_bi_metadata_request_is_model_inspection() -> None:
+    interpreter = HeuristicRequestInterpreter()
+
+    result = interpreter.interpret(
+        OrchestrateRequest(message="List Power BI semantic model tables and measures")
+    )
+
+    assert result.candidate_mcps == [McpTarget.POWER_BI]
+    assert result.task_type == TaskType.SEMANTIC_MODEL_INSPECTION
+    assert result.requested_action == RequestedAction.INSPECT_MODEL
+
+
+def test_power_bi_dax_request_is_dax_query() -> None:
+    interpreter = HeuristicRequestInterpreter()
+
+    result = interpreter.interpret(
+        OrchestrateRequest(message="Generate a DAX preview for Total Sales in Power BI")
+    )
+
+    assert result.candidate_mcps == [McpTarget.POWER_BI]
+    assert result.task_type == TaskType.DAX_QUERY
+    assert result.requested_action == RequestedAction.GENERATE_QUERY
+
+
+def test_power_bi_refresh_request_is_high_risk() -> None:
+    interpreter = HeuristicRequestInterpreter()
+
+    result = interpreter.interpret(
+        OrchestrateRequest(message="Refresh the Power BI semantic model")
+    )
+
+    assert result.candidate_mcps == [McpTarget.POWER_BI]
+    assert result.requested_action == RequestedAction.REFRESH
+    assert result.risk_level == RiskLevel.HIGH
+
+
 def test_sql_request_selects_postgresql_by_default() -> None:
     interpreter = HeuristicRequestInterpreter()
 

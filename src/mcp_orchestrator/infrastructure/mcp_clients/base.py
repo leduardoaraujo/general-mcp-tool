@@ -28,6 +28,7 @@ class PlaceholderMcpClient:
             supports_read=False,
             supports_write=False,
             supports_side_effects=False,
+            side_effect_support=False,
             notes=["Placeholder client for a future specialist integration."],
         )
 

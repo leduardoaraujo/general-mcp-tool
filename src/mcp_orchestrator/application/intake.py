@@ -9,10 +9,17 @@ from mcp_orchestrator.domain.models import RequestUnderstanding, UserRequest
 class HeuristicRequestUnderstandingService:
     power_bi_terms = (
         "power bi",
+        "powerbi",
         "semantic model",
+        "modelo semantico",
+        "modelo semântico",
         "measure",
+        "measures",
+        "medida",
+        "medidas",
         "dax",
         "dataset",
+        "fabric semantic model",
     )
     postgresql_terms = ("postgres", "postgresql")
     sql_server_terms = ("sql server", "mssql", "t-sql", "tsql")
@@ -21,7 +28,7 @@ class HeuristicRequestUnderstandingService:
     docs_terms = ("documentation", "docs", "manual", "playbook", "documentacao")
     preview_terms = ("preview", "prepare", "generate", "safe sql", "do not execute")
     read_terms = ("show", "list", "find", "query", "select", "read", "inspect")
-    write_terms = ("insert", "update", "delete", "drop", "create", "alter", "truncate")
+    write_terms = ("insert", "update", "delete", "drop", "create", "alter", "truncate", "modify", "rename")
     side_effect_terms = ("send", "email", "publish", "refresh", "deploy", "execute")
 
     def understand(self, request: UserRequest) -> RequestUnderstanding:
@@ -90,6 +97,10 @@ class HeuristicRequestUnderstandingService:
         if len(candidates) > 1:
             return TaskType.COMPOSITE
         if McpTarget.POWER_BI in candidates:
+            if "dax" in text:
+                return TaskType.DAX_QUERY
+            if self._contains_any(text, ("list", "inspect", "metadata", "tables", "measures")):
+                return TaskType.SEMANTIC_MODEL_INSPECTION
             return TaskType.SEMANTIC_MODEL_QUERY
         if McpTarget.POSTGRESQL in candidates or McpTarget.SQL_SERVER in candidates:
             return TaskType.SQL_QUERY
@@ -100,8 +111,12 @@ class HeuristicRequestUnderstandingService:
         return TaskType.UNKNOWN
 
     def _requested_action(self, text: str, task_type: TaskType) -> RequestedAction:
+        if "refresh" in text:
+            return RequestedAction.REFRESH
         if self._contains_any(text, self.write_terms):
             return RequestedAction.WRITE
+        if task_type == TaskType.SEMANTIC_MODEL_INSPECTION:
+            return RequestedAction.INSPECT_MODEL
         if task_type == TaskType.DOCUMENTATION_LOOKUP or "schema" in text:
             return RequestedAction.INSPECT_SCHEMA
         if self._contains_any(text, self.preview_terms):
@@ -117,7 +132,13 @@ class HeuristicRequestUnderstandingService:
 
     def _relevant_sources(self, task_type: TaskType, domain: Domain) -> list[str]:
         sources = ["business_rules", "schemas", "technical_docs"]
-        if task_type in {TaskType.SEMANTIC_MODEL_QUERY, TaskType.SQL_QUERY, TaskType.COMPOSITE}:
+        if task_type in {
+            TaskType.SEMANTIC_MODEL_QUERY,
+            TaskType.SEMANTIC_MODEL_INSPECTION,
+            TaskType.DAX_QUERY,
+            TaskType.SQL_QUERY,
+            TaskType.COMPOSITE,
+        }:
             sources.extend(["playbooks", "examples"])
         if task_type == TaskType.TABULAR_EXTRACTION:
             sources.extend(["examples", "playbooks"])
@@ -150,6 +171,8 @@ class HeuristicRequestUnderstandingService:
 
     def _risk_level(self, text: str, requested_action: RequestedAction) -> RiskLevel:
         if requested_action == RequestedAction.WRITE:
+            return RiskLevel.HIGH
+        if requested_action == RequestedAction.REFRESH:
             return RiskLevel.HIGH
         if self._contains_any(text, self.side_effect_terms) and requested_action != RequestedAction.GENERATE_QUERY:
             return RiskLevel.MEDIUM

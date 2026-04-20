@@ -19,7 +19,7 @@ from mcp_orchestrator.main import create_app
 from mcp_orchestrator.normalization import DefaultResponseNormalizer
 
 
-class FakePostgresToolRunner:
+class FakeToolRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
@@ -53,11 +53,30 @@ def test_health_endpoint() -> None:
 
 
 def test_orchestrate_endpoint_returns_normalized_response() -> None:
-    client = TestClient(create_app(Settings()))
+    server_catalog = LocalMcpServerCatalog(Path("mcps"))
+    tool_runner = FakeToolRunner()
+    service = OrchestrationService(
+        interpreter=HeuristicRequestInterpreter(),
+        retriever=LocalContextRetriever(Path("docs/context")),
+        composer=DefaultContextComposer(),
+        router=ExecutionRouter(
+            DefaultMcpClientRegistry(
+                server_catalog=server_catalog,
+                tool_runner=tool_runner,  # type: ignore[arg-type]
+            )
+        ),
+        normalizer=DefaultResponseNormalizer(),
+        server_catalog=server_catalog,
+        tool_runner=tool_runner,  # type: ignore[arg-type]
+        rag_top_k=5,
+    )
+    app = FastAPI()
+    app.include_router(create_api_router(service))
+    client = TestClient(app)
 
     response = client.post(
         "/orchestrate",
-        json={"message": "Show Total Sales from the Power BI semantic model"},
+        json={"message": "List Power BI semantic model tables and measures"},
     )
 
     body = response.json()
@@ -66,11 +85,13 @@ def test_orchestrate_endpoint_returns_normalized_response() -> None:
     assert body["summary"]
     assert body["mcp_trace"]
     assert body["raw_outputs"]
+    assert body["specialist_results"][0]["mcp_name"] == "power_bi"
+    assert tool_runner.calls[0][0] == "run_guided_modeling_request"
 
 
 def test_orchestrate_postgresql_request_returns_traceable_specialist_response() -> None:
     server_catalog = LocalMcpServerCatalog(Path("mcps"))
-    tool_runner = FakePostgresToolRunner()
+    tool_runner = FakeToolRunner()
     service = OrchestrationService(
         interpreter=HeuristicRequestInterpreter(),
         retriever=LocalContextRetriever(Path("docs/context")),

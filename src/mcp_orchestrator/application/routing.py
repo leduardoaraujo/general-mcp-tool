@@ -111,6 +111,8 @@ class HeuristicExecutionPlanningStrategy(ExecutionPlanningStrategy):
             hints[McpTarget.POSTGRESQL] = "run_guided_query"
         if McpTarget.SQL_SERVER in targets:
             hints[McpTarget.SQL_SERVER] = "run_guided_query"
+        if McpTarget.POWER_BI in targets:
+            hints[McpTarget.POWER_BI] = "run_guided_modeling_request"
         return hints
 
     def _trace(
@@ -232,10 +234,39 @@ class ExecutionRouter:
                 "auto_execute": self._auto_execute(plan.policy_decision),
                 "limit": 100,
             }
+        if target == McpTarget.POWER_BI:
+            return {
+                "request": self._power_bi_request(enriched_request),
+                "preview_only": not self._auto_execute(plan.policy_decision),
+                "allow_write": self._allow_write(plan.policy_decision),
+            }
         return {
             "intent": enriched_request.understanding.intent,
             "mode": plan.execution_mode.value,
         }
+
+    def _power_bi_request(self, enriched_request: EnrichedRequest) -> str:
+        context_lines = [
+            f"- {item.source_path}: {item.content[:500]}"
+            for item in enriched_request.retrieved_context.items
+        ]
+        constraints = enriched_request.constraints or [
+            "Use safe metadata/model inspection or DAX preview only.",
+            "Do not refresh or mutate the model unless execution policy explicitly allows it.",
+        ]
+        return "\n".join(
+            [
+                "Prepare a safe Power BI semantic-model response for this enriched request.",
+                f"Original user request: {enriched_request.original_request}",
+                f"Intent: {enriched_request.understanding.intent}",
+                f"Task type: {enriched_request.understanding.task_type.value}",
+                f"Requested action: {enriched_request.understanding.requested_action.value}",
+                "Constraints:",
+                *[f"- {constraint}" for constraint in constraints],
+                "Retrieved local context:",
+                *(context_lines or ["- No local context was retrieved."]),
+            ]
+        )
 
     def _relational_question(self, enriched_request: EnrichedRequest, target: McpTarget) -> str:
         context_lines = [
@@ -273,6 +304,15 @@ class ExecutionRouter:
             and policy_decision.read_only
             and not policy_decision.preview_only
             and not policy_decision.write
+            and not policy_decision.side_effects
+        )
+
+    def _allow_write(self, policy_decision: ExecutionPolicyDecision | None) -> bool:
+        if not policy_decision:
+            return False
+        return bool(
+            policy_decision.allow_execution
+            and policy_decision.write
             and not policy_decision.side_effects
         )
 

@@ -21,11 +21,14 @@ The executable Phase 0 flow is:
 7. Execute a `SpecialistExecutionRequest` through a specialist MCP client.
 8. Return a `NormalizedResponse`.
 
-PostgreSQL and SQL Server are real relational specialist client adapters. The
-PostgreSQL MCP server is checked into this repository. SQL Server expects a
+PostgreSQL and SQL Server are real relational specialist client adapters. Power
+BI is a real semantic/modeling specialist client adapter. Excel remains
+registered as a future extension point.
+
+The PostgreSQL MCP server is checked into this repository. The Power BI Modeling
+MCP package is managed under `mcps/powerbi-modeling-mcp`. SQL Server expects a
 local MCP server folder such as `mcps/sql-server-mcp`, `mcps/sqlserver-mcp`, or
-`mcps/mssql-mcp` before live execution can work. Power BI and Excel remain
-registered as future extension points.
+`mcps/mssql-mcp` before live execution can work.
 
 ## Execution Governance
 
@@ -41,9 +44,11 @@ call. The policy captures:
 - `blocked_reason`
 - `safety_level`
 
-Phase 2 is preview-first for relational backends. PostgreSQL and SQL Server
-orchestration call `run_guided_query` with `auto_execute=false` unless request
-metadata explicitly allows read-only execution:
+Phase 3 is preview-first for relational and semantic backends. PostgreSQL and
+SQL Server orchestration call `run_guided_query` with `auto_execute=false`
+unless request metadata explicitly allows read-only execution. Power BI
+orchestration uses safe semantic-model inspection and DAX preview workflows by
+default.
 
 ```json
 {
@@ -53,8 +58,9 @@ metadata explicitly allows read-only execution:
 }
 ```
 
-Write or side-effecting requests are blocked before a specialist MCP is called.
-The policy decision is included in `debug.orchestration_trace`.
+Write, refresh, model mutation, or side-effecting requests are blocked before a
+specialist MCP is called. The policy decision is included in
+`debug.orchestration_trace`.
 
 ## Requirements
 
@@ -62,6 +68,7 @@ The policy decision is included in `debug.orchestration_trace`.
 - Node.js and npm on `PATH` for `powerbi_mcp_manager`
 - PostgreSQL MCP environment variables when calling the real PostgreSQL MCP tools
 - A local SQL Server MCP server folder when calling SQL Server tools live
+- Power BI Desktop, Fabric, or PBIP setup when calling the real Power BI Modeling MCP tools live
 
 ## Installation
 
@@ -139,9 +146,13 @@ Invoke-RestMethod -Method Post `
   -Body $body
 ```
 
-For relational orchestration, Phase 2 calls `run_guided_query` with
+For relational orchestration, Phase 3 calls `run_guided_query` with
 `auto_execute=false`. The result is a safe SQL preview, not an automatic data-row
 query execution.
+
+For Power BI orchestration, Phase 3 calls a guided semantic modeling request in
+preview/safe mode. Metadata exploration, table listing, measure listing, and DAX
+preview are treated as safe. Refresh and model mutation are blocked by default.
 
 To explicitly allow read-only execution in Phase 1:
 
@@ -240,6 +251,19 @@ The SQL Server client adapter is implemented, but this repository does not yet
 include a SQL Server MCP server. Add a local server folder under `mcps/` using an
 alias such as `sql-server-mcp`, `sqlserver-mcp`, or `mssql-mcp`.
 
+Power BI MCP setup is managed by `powerbi_mcp_manager`. The local package is
+expected at:
+
+```text
+mcps/powerbi-modeling-mcp
+```
+
+The Power BI Modeling MCP requires a connection to a semantic model through
+Power BI Desktop, Fabric, or PBIP files before live model operations can work.
+The orchestrator treats metadata/model exploration and DAX previews as safe
+operations. Refresh and model write operations remain blocked by execution
+policy unless a future confirmation workflow is added.
+
 List discovered servers:
 
 ```powershell
@@ -256,6 +280,12 @@ List SQL Server tools after adding a local SQL Server MCP server:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/mcp-servers/sql_server/tools
+```
+
+List Power BI tools:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/mcp-servers/power_bi/tools
 ```
 
 Call a PostgreSQL tool directly:
@@ -328,5 +358,6 @@ src/mcp_orchestrator/
 ```
 
 See `docs/architecture/executable-foundation.md` and
-`docs/architecture/phase-2-multi-backend-orchestration.md` for the implemented
+`docs/architecture/phase-2-multi-backend-orchestration.md` and
+`docs/architecture/phase-3-power-bi-specialist.md` for the implemented
 architecture.

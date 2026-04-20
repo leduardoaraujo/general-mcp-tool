@@ -53,6 +53,9 @@ class PostgreSqlMcpClient:
             supports_read=True,
             supports_write=False,
             supports_side_effects=False,
+            table_listing=True,
+            metadata_read=True,
+            side_effect_support=False,
             default_tool="run_guided_query",
             supported_tools=[
                 "run_guided_query",
