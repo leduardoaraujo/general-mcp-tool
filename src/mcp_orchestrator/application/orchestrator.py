@@ -3,39 +3,46 @@ from __future__ import annotations
 from uuid import uuid4
 
 from mcp_orchestrator.config import Settings
-from mcp_orchestrator.domain.models import NormalizedResponse, OrchestrateRequest
-from mcp_orchestrator.domain.models import McpToolCallResponse, McpToolDefinition
+from mcp_orchestrator.domain.models import (
+    McpToolCallResponse,
+    McpToolDefinition,
+    NormalizedResponse,
+    UserRequest,
+)
 from mcp_orchestrator.domain.ports import (
     ContextComposer,
-    RagRetriever,
-    RequestInterpreter,
+    ContextRetriever,
+    RequestUnderstandingService,
     ResponseNormalizer,
 )
+from mcp_orchestrator.infrastructure.context import LocalContextRetriever
 from mcp_orchestrator.infrastructure.mcp_clients import DefaultMcpClientRegistry
 from mcp_orchestrator.infrastructure.mcp_servers import LocalMcpServerCatalog, StdioMcpToolRunner
-from mcp_orchestrator.infrastructure.rag import TextualRagRetriever
 from mcp_orchestrator.normalization import DefaultResponseNormalizer
 from mcp_orchestrator.observability import TimingRecorder, get_logger, log_stage
 
 from .composer import DefaultContextComposer
-from .intake import HeuristicRequestInterpreter
-from .routing import McpRouter
+from .intake import HeuristicRequestUnderstandingService
+from .routing import ExecutionRouter
 
 
 class OrchestrationService:
     def __init__(
         self,
         *,
-        interpreter: RequestInterpreter,
-        retriever: RagRetriever,
+        understanding_service: RequestUnderstandingService | None = None,
+        interpreter: RequestUnderstandingService | None = None,
+        retriever: ContextRetriever,
         composer: ContextComposer,
-        router: McpRouter,
+        router: ExecutionRouter,
         normalizer: ResponseNormalizer,
         server_catalog: LocalMcpServerCatalog,
         tool_runner: StdioMcpToolRunner,
         rag_top_k: int,
     ) -> None:
-        self.interpreter = interpreter
+        self.understanding_service = understanding_service or interpreter
+        if self.understanding_service is None:
+            raise ValueError("understanding_service is required.")
         self.retriever = retriever
         self.composer = composer
         self.router = router
@@ -45,37 +52,37 @@ class OrchestrationService:
         self.rag_top_k = rag_top_k
         self.logger = get_logger(__name__)
 
-    async def orchestrate(self, request: OrchestrateRequest) -> NormalizedResponse:
+    async def orchestrate(self, request: UserRequest) -> NormalizedResponse:
         correlation_id = str(uuid4())
         timing = TimingRecorder()
 
         started_at = timing.start()
-        interpretation = self.interpreter.interpret(request)
+        understanding = self.understanding_service.understand(request)
         self._log(correlation_id, "intake", timing.stop("intake", started_at))
 
         started_at = timing.start()
-        rag_context = self.retriever.retrieve(
+        retrieved_context = self.retriever.retrieve(
             request.message,
-            filters=self._rag_filters(request, interpretation),
+            filters=self._context_filters(request, understanding),
             limit=self.rag_top_k,
         )
-        self._log(correlation_id, "rag", timing.stop("rag", started_at))
+        self._log(correlation_id, "context_retrieval", timing.stop("context_retrieval", started_at))
 
         started_at = timing.start()
-        enriched = self.composer.compose(correlation_id, request, interpretation, rag_context)
+        enriched = self.composer.compose(correlation_id, request, understanding, retrieved_context)
         self._log(correlation_id, "compose", timing.stop("compose", started_at))
 
         started_at = timing.start()
-        clients, routing_trace = self.router.select_clients(enriched)
+        plan = self.router.create_plan(enriched)
         self._log(
             correlation_id,
-            "routing",
-            timing.stop("routing", started_at),
-            {"selected_clients": [client.name for client in clients]},
+            "planning",
+            timing.stop("planning", started_at),
+            {"selected_targets": [target.value for target in plan.target_mcps]},
         )
 
         started_at = timing.start()
-        results = await self.router.execute_clients(enriched, clients, routing_trace)
+        results = await self.router.execute_plan(enriched, plan)
         self._log(correlation_id, "mcp_execution", timing.stop("mcp_execution", started_at))
 
         started_at = timing.start()
@@ -112,16 +119,12 @@ class OrchestrationService:
             raise ValueError(f"MCP server not found: {server_name}")
         return await self.tool_runner.call_tool(server, tool_name, arguments)
 
-    def _rag_filters(
-        self,
-        request: OrchestrateRequest,
-        interpretation,
-    ) -> dict[str, object]:
+    def _context_filters(self, request: UserRequest, understanding) -> dict[str, object]:
         filters: dict[str, object] = {}
         if request.tags:
             filters["tags"] = request.tags
-        if interpretation.domain.value not in {"analytics", "general", "unknown"}:
-            filters["domain"] = interpretation.domain.value
+        if understanding.domain.value not in {"analytics", "general", "unknown"}:
+            filters["domain"] = understanding.domain.value
         return filters
 
     def _log(
@@ -143,20 +146,24 @@ class OrchestrationService:
 
 def create_orchestration_service(settings: Settings | None = None) -> OrchestrationService:
     settings = settings or Settings()
-    registry = DefaultMcpClientRegistry()
-    router = McpRouter(registry)
-    retriever = TextualRagRetriever(
+    server_catalog = LocalMcpServerCatalog(settings.resolved_mcps_dir())
+    tool_runner = StdioMcpToolRunner()
+    registry = DefaultMcpClientRegistry(
+        server_catalog=server_catalog,
+        tool_runner=tool_runner,
+    )
+    router = ExecutionRouter(registry)
+    retriever = LocalContextRetriever(
         settings.resolved_docs_dir(),
         chunk_size=settings.rag_chunk_size,
     )
-    server_catalog = LocalMcpServerCatalog(settings.resolved_mcps_dir())
     return OrchestrationService(
-        interpreter=HeuristicRequestInterpreter(),
+        understanding_service=HeuristicRequestUnderstandingService(),
         retriever=retriever,
         composer=DefaultContextComposer(),
         router=router,
         normalizer=DefaultResponseNormalizer(),
         server_catalog=server_catalog,
-        tool_runner=StdioMcpToolRunner(),
+        tool_runner=tool_runner,
         rag_top_k=settings.rag_top_k,
     )

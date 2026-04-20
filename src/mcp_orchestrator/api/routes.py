@@ -8,7 +8,7 @@ from mcp_orchestrator.domain.models import (
     McpToolCallResponse,
     McpToolDefinition,
     NormalizedResponse,
-    OrchestrateRequest,
+    UserRequest,
 )
 
 
@@ -20,7 +20,7 @@ def create_api_router(service: OrchestrationService) -> APIRouter:
         return {"status": "ok", "service": "mcp_orchestrator"}
 
     @router.post("/orchestrate", response_model=NormalizedResponse)
-    async def orchestrate(request: OrchestrateRequest) -> NormalizedResponse:
+    async def orchestrate(request: UserRequest) -> NormalizedResponse:
         return await service.orchestrate(request)
 
     @router.get("/docs-index/status")

@@ -3,43 +3,42 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from mcp_orchestrator.domain.enums import Domain, McpTarget, TaskType
-from mcp_orchestrator.domain.models import OrchestrateRequest, RequestInterpretation
+from mcp_orchestrator.domain.models import RequestUnderstanding, UserRequest
 
 
-class HeuristicRequestInterpreter:
+class HeuristicRequestUnderstandingService:
     power_bi_terms = (
         "power bi",
         "semantic model",
-        "modelo semantico",
-        "modelo semântico",
         "measure",
         "dax",
         "dataset",
     )
     postgresql_terms = ("postgres", "postgresql")
     sql_server_terms = ("sql server", "mssql", "t-sql", "tsql")
-    sql_terms = ("sql", "query", "consulta", "table", "tabela", "join")
+    sql_terms = ("sql", "query", "consulta", "table", "tabela", "join", "database")
     excel_terms = ("excel", "xlsx", "spreadsheet", "worksheet", "planilha")
-    docs_terms = ("documentacao", "documentação", "docs", "manual", "playbook")
+    docs_terms = ("documentation", "docs", "manual", "playbook", "documentacao")
 
-    def interpret(self, request: OrchestrateRequest) -> RequestInterpretation:
+    def understand(self, request: UserRequest) -> RequestUnderstanding:
         text = self._normalize(f"{request.message} {request.domain_hint or ''}")
         candidates = self._candidate_mcps(text)
         domain = self._domain(text, candidates)
         task_type = self._task_type(text, candidates)
-        sources = self._relevant_sources(task_type, domain)
-        constraints = self._constraints(text)
 
-        return RequestInterpretation(
+        return RequestUnderstanding(
             original_request=request.message,
             intent=self._intent(task_type, domain),
             domain=domain,
             task_type=task_type,
-            relevant_sources=sources,
+            relevant_sources=self._relevant_sources(task_type, domain),
             candidate_mcps=candidates,
-            constraints=constraints,
+            constraints=self._constraints(text),
             confidence=self._confidence(text, candidates),
         )
+
+    def interpret(self, request: UserRequest) -> RequestUnderstanding:
+        return self.understand(request)
 
     def _candidate_mcps(self, text: str) -> list[McpTarget]:
         candidates: list[McpTarget] = []
@@ -49,11 +48,8 @@ class HeuristicRequestInterpreter:
             candidates.append(McpTarget.POSTGRESQL)
         if self._contains_any(text, self.sql_server_terms):
             candidates.append(McpTarget.SQL_SERVER)
-        if self._contains_any(text, self.sql_terms):
-            if McpTarget.POSTGRESQL not in candidates:
-                candidates.append(McpTarget.POSTGRESQL)
-            if McpTarget.SQL_SERVER not in candidates:
-                candidates.append(McpTarget.SQL_SERVER)
+        if self._contains_any(text, self.sql_terms) and not candidates:
+            candidates.append(McpTarget.POSTGRESQL)
         if self._contains_any(text, self.excel_terms):
             candidates.append(McpTarget.EXCEL)
         return candidates
@@ -87,20 +83,20 @@ class HeuristicRequestInterpreter:
         return TaskType.UNKNOWN
 
     def _relevant_sources(self, task_type: TaskType, domain: Domain) -> list[str]:
-        sources = ["business_rules", "schemas"]
-        if task_type in {TaskType.SEMANTIC_MODEL_QUERY, TaskType.SQL_QUERY}:
+        sources = ["business_rules", "schemas", "technical_docs"]
+        if task_type in {TaskType.SEMANTIC_MODEL_QUERY, TaskType.SQL_QUERY, TaskType.COMPOSITE}:
             sources.extend(["playbooks", "examples"])
         if task_type == TaskType.TABULAR_EXTRACTION:
             sources.extend(["examples", "playbooks"])
         if domain == Domain.GENERAL:
-            sources = ["playbooks", "business_rules"]
+            sources = ["technical_docs", "playbooks", "business_rules"]
         return list(dict.fromkeys(sources))
 
     def _constraints(self, text: str) -> list[str]:
         constraints: list[str] = []
-        if "sem executar" in text or "do not execute" in text:
+        if "do not execute" in text or "sem executar" in text:
             constraints.append("Do not execute external operations.")
-        if "somente leitura" in text or "read only" in text:
+        if "read only" in text or "somente leitura" in text:
             constraints.append("Read-only execution.")
         return constraints
 
@@ -122,3 +118,6 @@ class HeuristicRequestInterpreter:
 
     def _normalize(self, value: str) -> str:
         return " ".join(value.lower().split())
+
+
+HeuristicRequestInterpreter = HeuristicRequestUnderstandingService

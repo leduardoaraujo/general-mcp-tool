@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from mcp_orchestrator.domain.enums import ResultStatus
-from mcp_orchestrator.domain.models import MCPResult, NormalizedResponse
+from mcp_orchestrator.domain.models import NormalizedResponse, SpecialistExecutionResult
 
 
 class DefaultResponseNormalizer:
     def normalize(
         self,
         correlation_id: str,
-        results: list[MCPResult],
+        results: list[SpecialistExecutionResult],
         timings: dict[str, float],
     ) -> NormalizedResponse:
         status = self._status(results)
@@ -23,7 +23,7 @@ class DefaultResponseNormalizer:
             correlation_id=correlation_id,
             status=status,
             summary=self._summary(results, status),
-            raw_outputs=results,
+            specialist_results=results,
             structured_data=self._structured_data(results),
             sources_used=sources,
             mcp_trace=trace,
@@ -31,9 +31,10 @@ class DefaultResponseNormalizer:
             warnings=warnings,
             next_actions=self._next_actions(status, errors),
             timings={key: round(value, 3) for key, value in timings.items()},
+            debug={"specialist_count": len(results)},
         )
 
-    def _status(self, results: list[MCPResult]) -> ResultStatus:
+    def _status(self, results: list[SpecialistExecutionResult]) -> ResultStatus:
         if not results:
             return ResultStatus.ERROR
         success_count = sum(1 for result in results if result.status == ResultStatus.SUCCESS)
@@ -43,16 +44,16 @@ class DefaultResponseNormalizer:
             return ResultStatus.PARTIAL_SUCCESS
         return ResultStatus.ERROR
 
-    def _summary(self, results: list[MCPResult], status: ResultStatus) -> str:
+    def _summary(self, results: list[SpecialistExecutionResult], status: ResultStatus) -> str:
         if not results:
-            return "No MCP results were produced."
+            return "No specialist results were produced."
         if status == ResultStatus.SUCCESS:
             return "MCP Orchestrator completed the request successfully."
         if status == ResultStatus.PARTIAL_SUCCESS:
             return "MCP Orchestrator completed the request with partial success."
         return "MCP Orchestrator could not complete the request."
 
-    def _structured_data(self, results: list[MCPResult]) -> dict[str, Any]:
+    def _structured_data(self, results: list[SpecialistExecutionResult]) -> dict[str, Any]:
         return {
             result.mcp_name: result.structured_data
             for result in results
@@ -64,6 +65,6 @@ class DefaultResponseNormalizer:
             return ["Review structured_data and sources_used."]
         return [
             "Review errors and mcp_trace.",
-            "Adjust the request or add more context documents.",
+            "Confirm the specialist MCP server is installed and configured.",
             *errors[:1],
         ]

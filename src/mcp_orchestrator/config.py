@@ -22,7 +22,7 @@ class Settings:
             return Path(configured).resolve()
         if self.docs_dir:
             return self.docs_dir.resolve()
-        return self.resolved_project_dir() / "docs"
+        return self.resolved_project_dir() / "docs" / "context"
 
     def resolved_mcps_dir(self) -> Path:
         configured = os.getenv("MCP_ORCHESTRATOR_MCPS_DIR")

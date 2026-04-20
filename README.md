@@ -1,134 +1,74 @@
 # General MCP Tool
 
-Projeto Python com dois modulos principais:
+This repository contains two Python packages:
 
-- `powerbi_mcp_manager`: instala e atualiza localmente o pacote npm `@microsoft/powerbi-modeling-mcp`.
-- `mcp_orchestrator`: API FastAPI para orquestracao de requests com intake, RAG local, roteamento de clients MCP e normalizacao de resposta.
+- `powerbi_mcp_manager`: installs and updates the local `@microsoft/powerbi-modeling-mcp` package.
+- `mcp_orchestrator`: a FastAPI-based contextual orchestrator for specialist MCP servers.
 
-## Visao Geral
+## MCP Orchestrator
 
-Este repositorio centraliza:
+The MCP Orchestrator is a contextual middleware layer. It does not send the raw
+user request directly to specialist MCPs.
 
-- gerenciamento de versao e configuracao do Power BI Modeling MCP em pasta controlada;
-- orquestracao de requests com contexto vindo de arquivos em `docs/`;
-- uma base inicial para evoluir fluxos de analise orientados a regras de negocio.
+The executable Phase 0 flow is:
 
-## Requisitos
+1. Receive a typed `UserRequest`.
+2. Build a typed `RequestUnderstanding`.
+3. Retrieve local context from `docs/context`.
+4. Compose an `EnrichedRequest`.
+5. Create an `ExecutionPlan`.
+6. Execute a `SpecialistExecutionRequest` through a specialist MCP client.
+7. Return a `NormalizedResponse`.
+
+PostgreSQL is the first real specialist integration. Power BI, SQL Server, and
+Excel remain registered as future extension points.
+
+## Requirements
 
 - Python 3.11+
-- Node.js + npm no PATH (necessario para o `powerbi_mcp_manager`)
-- Acesso ao registro npm
+- Node.js and npm on `PATH` for `powerbi_mcp_manager`
+- PostgreSQL MCP environment variables when calling the real PostgreSQL MCP tools
 
-## Instalacao
-
-No diretorio raiz do projeto:
+## Installation
 
 ```powershell
 python -m pip install -e .
 ```
 
-Dependencias de desenvolvimento (testes):
+Development dependencies:
 
 ```powershell
 python -m pip install -e .[dev]
 ```
 
-## Modulo 1: Power BI MCP Manager
-
-Responsavel por instalar o pacote npm em area local do projeto.
-
-- pasta de instalacao padrao: `mcps/powerbi-modeling-mcp`
-- cache npm padrao: `.npm-cache`
-
-### Comandos CLI
-
-Depois de instalar o projeto com `pip install -e .`:
+Install the checked-in PostgreSQL MCP server dependencies before calling it
+through stdio:
 
 ```powershell
-powerbi-mcp-manager status
-powerbi-mcp-manager install
-powerbi-mcp-manager update
-powerbi-mcp-manager check
-powerbi-mcp-manager path
-powerbi-mcp-manager config
+python -m pip install -r mcps/postgressql-mcp-master/requirements.txt
 ```
 
-Sem instalar como script de entrypoint:
+## Run The Orchestrator API
 
-```powershell
-python scripts/powerbi_mcp_manager.py status
-python scripts/powerbi_mcp_manager.py install
-python scripts/powerbi_mcp_manager.py update
-python scripts/powerbi_mcp_manager.py check
-python scripts/powerbi_mcp_manager.py path
-python scripts/powerbi_mcp_manager.py config
-```
-
-### Codigos de saida do `check`
-
-- `0`: instalado e atualizado
-- `1`: instalado, mas com atualizacao disponivel
-- `2`: nao instalado
-
-### Uso em codigo Python
-
-```python
-from powerbi_mcp_manager import PowerBiMcpManager
-
-manager = PowerBiMcpManager(project_dir=r"C:\my-project")
-
-status = manager.status()
-print(status.state)
-print(status.latest_version)
-
-if status.state != "up-to-date":
-    manager.update()
-
-config = manager.mcp_config()
-print(config)
-```
-
-### Variaveis de ambiente (manager)
-
-- `POWERBI_MCP_PACKAGE`: pacote npm alvo (padrao: `@microsoft/powerbi-modeling-mcp`)
-- `POWERBI_MCP_TAG`: dist-tag acompanhada (padrao: `latest`)
-- `POWERBI_MCP_DIR`: pasta local de instalacao
-- `POWERBI_MCP_NPM_CACHE`: pasta local de cache do npm
-
-Exemplo:
-
-```powershell
-$env:POWERBI_MCP_TAG = "latest"
-powerbi-mcp-manager update
-```
-
-## Modulo 2: MCP Orchestrator
-
-API FastAPI com pipeline:
-
-1. Intake e interpretacao da solicitacao.
-2. Recuperacao de contexto local (RAG textual) a partir de `docs/`.
-3. Composicao da request enriquecida.
-4. Roteamento para clients MCP.
-5. Normalizacao da resposta final.
-
-### Executar API
-
-Opcao 1 (desenvolvimento com reload):
+Development server:
 
 ```powershell
 python -m uvicorn mcp_orchestrator.main:app --app-dir src --reload
 ```
 
-Opcao 2 (entrypoint do projeto):
+Project entrypoint:
 
 ```powershell
 mcp-orchestrator
 ```
 
-Servidor padrao: `http://127.0.0.1:8000`
+Default URL:
 
-### Endpoints
+```text
+http://127.0.0.1:8000
+```
+
+## API Endpoints
 
 - `GET /health`
 - `POST /orchestrate`
@@ -138,26 +78,26 @@ Servidor padrao: `http://127.0.0.1:8000`
 - `GET /mcp-servers/{server_name}/tools`
 - `POST /mcp-servers/{server_name}/tools/{tool_name}`
 
-### Exemplo de request
+## `/orchestrate` Example
 
 ```json
 {
-  "message": "Show Total Sales from the Power BI semantic model",
-  "domain_hint": "sales",
-  "tags": ["powerbi", "sales"],
+  "message": "Use PostgreSQL to find the tables that can answer monthly sales revenue, then prepare a safe SQL preview.",
+  "domain_hint": "postgresql",
+  "tags": ["sales", "postgresql"],
   "metadata": {}
 }
 ```
 
-### Exemplo via PowerShell
+PowerShell:
 
 ```powershell
 $body = @{
-  message = "Show Total Sales from the Power BI semantic model"
-  domain_hint = "sales"
-  tags = @("powerbi", "sales")
+  message = "Use PostgreSQL to find tables for monthly sales revenue and prepare safe SQL."
+  domain_hint = "postgresql"
+  tags = @("sales", "postgresql")
   metadata = @{}
-} | ConvertTo-Json
+} | ConvertTo-Json -Depth 5
 
 Invoke-RestMethod -Method Post `
   -Uri "http://127.0.0.1:8000/orchestrate" `
@@ -165,51 +105,75 @@ Invoke-RestMethod -Method Post `
   -Body $body
 ```
 
-### Variaveis de ambiente (orchestrator)
+For PostgreSQL orchestration, Phase 0 calls `run_guided_query` with
+`auto_execute=false`. The result is a safe SQL preview, not an automatic data-row
+query execution.
 
-- `MCP_ORCHESTRATOR_PROJECT_DIR`: pasta base do projeto para resolucao de caminhos.
-- `MCP_ORCHESTRATOR_DOCS_DIR`: pasta de documentos para indexacao RAG.
-- `MCP_ORCHESTRATOR_MCPS_DIR`: pasta de servidores MCP locais.
+## Local Context
 
-Se `MCP_ORCHESTRATOR_DOCS_DIR` nao for definido, o padrao e `<project_dir>/docs`.
-Se `MCP_ORCHESTRATOR_MCPS_DIR` nao for definido, o padrao e `<project_dir>/mcps`.
+The default context directory is:
 
-### Pasta `mcps/`
+```text
+docs/context/
+  business_rules/
+  schemas/
+  technical_docs/
+  examples/
+  playbooks/
+```
 
-Servidores MCP especializados podem ficar em `mcps/`, cada um em sua propria
-pasta, com um `server.py` como ponto de entrada.
+Override it with:
 
-Exemplo:
+```powershell
+$env:MCP_ORCHESTRATOR_DOCS_DIR = "C:\path\to\context"
+```
+
+Rebuild the in-memory index without restarting:
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/docs-index/rebuild
+```
+
+## Specialist MCP Servers
+
+Specialist MCP servers live under `mcps/`.
 
 ```text
 mcps/
   powerbi-modeling-mcp/
-    package.json
-    package-lock.json
-    node_modules/
   postgressql-mcp-master/
     server.py
-    pyproject.toml
-    requirements.txt
 ```
 
-O orchestrator nao importa o codigo desses servidores diretamente. Servidores
-Python sao tratados como processos `python server.py`; servidores npm, como o
-Power BI Modeling MCP, sao tratados pelo binario instalado em `node_modules/.bin`.
+The orchestrator does not import specialist server code directly. It discovers
+local MCP servers and calls them through MCP transport adapters.
 
-Para ver quais servidores locais foram descobertos:
+PostgreSQL MCP configuration is read by the PostgreSQL MCP server itself:
+
+```env
+POSTGRES_DSN=postgresql://user:password@localhost:5432/app_db
+```
+
+or:
+
+```env
+POSTGRES_DB_1_NAME=main
+POSTGRES_DB_1_DSN=postgresql://user:password@localhost:5432/app_db
+```
+
+List discovered servers:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/mcp-servers/status
 ```
 
-Para listar tools de um MCP filho via stdio:
+List PostgreSQL tools:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/mcp-servers/postgresql/tools
 ```
 
-Para chamar uma tool:
+Call a PostgreSQL tool directly:
 
 ```powershell
 $body = @{
@@ -224,27 +188,59 @@ Invoke-RestMethod -Method Post `
   -Body $body
 ```
 
-O Postgres MCP precisa de variaveis de ambiente como `POSTGRES_DSN` ou
-`POSTGRES_DB_1_NAME`/`POSTGRES_DB_1_DSN`. Sem credenciais, o principal consegue
-descobrir o servidor, mas a chamada real de tool pode falhar com erro controlado.
+## Power BI MCP Manager
 
-## Testes
+The Power BI manager installs the npm MCP package into a controlled local
+directory.
 
-Executar suite:
+Default installation directory:
 
-```powershell
-pytest
+```text
+mcps/powerbi-modeling-mcp
 ```
 
-## Estrutura (resumo)
+Commands:
 
-- `src/powerbi_mcp_manager/`: manager e CLI
-- `src/mcp_orchestrator/`: API, dominio, aplicacao, infraestrutura e normalizacao
-- `docs/`: base de conhecimento para RAG e material de negocio/arquitetura
-- `tests/`: testes automatizados
+```powershell
+powerbi-mcp-manager status
+powerbi-mcp-manager install
+powerbi-mcp-manager update
+powerbi-mcp-manager check
+powerbi-mcp-manager path
+powerbi-mcp-manager config
+```
 
-## Observacoes
+Without installing entrypoints:
 
-- O estado do pacote gerenciado pode ser: `not-installed`, `up-to-date` ou `update-available`.
-- O endpoint `POST /docs-index/rebuild` permite reconstruir o indice de documentos sem reiniciar a API.
-- O endpoint `GET /mcp-servers/status` lista servidores MCP locais descobertos em `mcps/`.
+```powershell
+python scripts/powerbi_mcp_manager.py status
+python scripts/powerbi_mcp_manager.py install
+python scripts/powerbi_mcp_manager.py update
+python scripts/powerbi_mcp_manager.py check
+python scripts/powerbi_mcp_manager.py path
+python scripts/powerbi_mcp_manager.py config
+```
+
+## Tests
+
+```powershell
+python -m pytest
+```
+
+## Project Structure
+
+```text
+src/mcp_orchestrator/
+  api/
+  application/
+  domain/
+  infrastructure/
+    context/
+    mcp_clients/
+    mcp_servers/
+  normalization/
+  observability/
+```
+
+See `docs/architecture/executable-foundation.md` for the implemented Phase 0
+architecture.

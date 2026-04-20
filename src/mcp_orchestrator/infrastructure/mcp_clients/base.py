@@ -4,54 +4,55 @@ from time import perf_counter
 from typing import Any
 
 from mcp_orchestrator.domain.enums import McpTarget, ResultStatus
-from mcp_orchestrator.domain.models import EnrichedRequest, MCPResult
+from mcp_orchestrator.domain.models import (
+    EnrichedRequest,
+    ExecutionPlan,
+    SpecialistExecutionRequest,
+    SpecialistExecutionResult,
+)
 
 
-class BaseMockMcpClient:
+class PlaceholderMcpClient:
     name: str
     target: McpTarget
 
-    def can_handle(self, enriched_request: EnrichedRequest) -> bool:
-        return self.target in enriched_request.interpretation.candidate_mcps
+    def can_handle(self, plan: ExecutionPlan, request: EnrichedRequest) -> bool:
+        return self.target in plan.target_mcps
 
-    async def execute(self, enriched_request: EnrichedRequest) -> MCPResult:
+    async def execute(self, request: SpecialistExecutionRequest) -> SpecialistExecutionResult:
         started_at = perf_counter()
-        data = self._structured_data(enriched_request)
         duration_ms = (perf_counter() - started_at) * 1000
-        return MCPResult(
+        return SpecialistExecutionResult(
             mcp_name=self.name,
-            status=ResultStatus.SUCCESS,
-            summary=self._summary(enriched_request),
-            raw_output={
-                "mock": True,
-                "target": self.target.value,
-                "intent": enriched_request.interpretation.intent,
-            },
-            structured_data=data,
-            sources_used=self._sources(enriched_request),
+            target=self.target,
+            status=ResultStatus.ERROR,
+            summary=f"{self.name} is not integrated in Phase 0.",
+            structured_data=self._structured_data(request),
+            sources_used=self._sources(request),
             trace=[
-                f"{self.name} received enriched request {enriched_request.correlation_id}.",
-                f"{self.name} used {len(enriched_request.rag_context.items)} context items.",
+                f"{self.name} received enriched request {request.correlation_id}.",
+                f"{self.name} is registered as a future specialist integration.",
             ],
-            errors=[],
-            warnings=self._warnings(enriched_request),
+            errors=[f"{self.name} client is a placeholder."],
+            warnings=[],
             duration_ms=duration_ms,
+            debug={"phase": "placeholder", "target": self.target.value},
         )
 
-    def _summary(self, enriched_request: EnrichedRequest) -> str:
-        return f"{self.name} produced a mock response."
-
-    def _structured_data(self, enriched_request: EnrichedRequest) -> dict[str, Any]:
+    def _structured_data(self, request: SpecialistExecutionRequest) -> dict[str, Any]:
         return {
             "mcp": self.target.value,
-            "domain": enriched_request.interpretation.domain.value,
-            "task_type": enriched_request.interpretation.task_type.value,
+            "domain": request.enriched_request.understanding.domain.value,
+            "task_type": request.enriched_request.understanding.task_type.value,
         }
 
-    def _sources(self, enriched_request: EnrichedRequest) -> list[str]:
-        return list(dict.fromkeys(item.source_path for item in enriched_request.rag_context.items))
+    def _sources(self, request: SpecialistExecutionRequest) -> list[str]:
+        return list(
+            dict.fromkeys(
+                item.source_path
+                for item in request.enriched_request.retrieved_context.items
+            )
+        )
 
-    def _warnings(self, enriched_request: EnrichedRequest) -> list[str]:
-        if not enriched_request.rag_context.items:
-            return ["No RAG context item was retrieved for this mock execution."]
-        return []
+
+BaseMockMcpClient = PlaceholderMcpClient

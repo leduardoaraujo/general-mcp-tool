@@ -14,16 +14,25 @@ def test_power_bi_request_selects_power_bi() -> None:
     assert result.task_type == TaskType.SEMANTIC_MODEL_QUERY
 
 
-def test_sql_request_selects_sql_clients() -> None:
+def test_sql_request_selects_postgresql_by_default() -> None:
     interpreter = HeuristicRequestInterpreter()
 
     result = interpreter.interpret(
         OrchestrateRequest(message="Write a SQL query joining sales_orders and customers")
     )
 
-    assert McpTarget.POSTGRESQL in result.candidate_mcps
+    assert result.candidate_mcps == [McpTarget.POSTGRESQL]
+    assert result.task_type == TaskType.SQL_QUERY
+
+
+def test_explicit_sql_server_request_selects_sql_server() -> None:
+    interpreter = HeuristicRequestInterpreter()
+
+    result = interpreter.interpret(
+        OrchestrateRequest(message="Write a SQL Server query for sales_orders")
+    )
+
     assert McpTarget.SQL_SERVER in result.candidate_mcps
-    assert result.task_type == TaskType.COMPOSITE
 
 
 def test_excel_request_selects_excel() -> None:

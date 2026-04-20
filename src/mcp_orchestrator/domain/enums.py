@@ -32,9 +32,17 @@ class McpTarget(str, Enum):
 class DocumentType(str, Enum):
     BUSINESS_RULE = "business_rule"
     SCHEMA = "schema"
+    TECHNICAL_DOC = "technical_doc"
     PLAYBOOK = "playbook"
     EXAMPLE = "example"
     UNKNOWN = "unknown"
+
+
+class ExecutionMode(str, Enum):
+    SIMPLE = "simple"
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel"
+    PREVIEW_ONLY = "preview_only"
 
 
 class ResultStatus(str, Enum):
