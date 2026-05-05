@@ -6,6 +6,10 @@ from typing import Any
 import httpx
 
 from mcp_orchestrator.domain.models import ChatResponse, NormalizedResponse, UserRequest
+from mcp_orchestrator.application.power_bi_measures import (
+    find_matching_measure,
+    extract_date_filter_from_query,
+)
 
 
 class ChatAnswerService:
@@ -104,6 +108,11 @@ class ChatAnswerService:
         return text
 
     def _fallback_message(self, request: UserRequest, orchestration: NormalizedResponse) -> str:
+        # Try to handle measure value query first
+        value_query_message = self._measure_value_query_message(request, orchestration)
+        if value_query_message:
+            return value_query_message
+        
         power_bi_message = self._power_bi_message(request, orchestration)
         if power_bi_message:
             return power_bi_message
@@ -119,6 +128,137 @@ class ChatAnswerService:
             )
         if orchestration.sources_used:
             lines.append(f"Fontes usadas: {', '.join(orchestration.sources_used[:3])}")
+        return "\n".join(lines)
+    
+    def _measure_value_query_message(
+        self,
+        request: UserRequest,
+        orchestration: NormalizedResponse,
+    ) -> str | None:
+        """
+        Format response for measure value queries.
+        Tries to extract actual measure values from Power BI execution results.
+        """
+        power_bi_data = None
+        if isinstance(orchestration.structured_data, dict):
+            power_bi_data = orchestration.structured_data.get("power_bi")
+        if not isinstance(power_bi_data, dict):
+            return None
+        
+        # Check if we have DAX query results
+        dax_results = power_bi_data.get("dax_query_results")
+        if not dax_results:
+            # Try to generate a helpful message if we have the measure info
+            return self._generate_value_query_preview(request, power_bi_data)
+        
+        # Format the actual results
+        return self._format_dax_results(request, dax_results, power_bi_data)
+    
+    def _generate_value_query_preview(self, request: UserRequest, power_bi_data: dict[str, Any]) -> str | None:
+        """
+        Generate a preview/suggestion message for value queries,
+        indicating which measure was identified and what would be queried.
+        """
+        # Try to match the measure from user request
+        measure = find_matching_measure(request.message)
+        date_filter = extract_date_filter_from_query(request.message)
+        
+        if not measure:
+            return None
+        
+        lines = [f"Identificada medida: {measure.display_name}"]
+        
+        if date_filter:
+            date_parts = []
+            if date_filter.get("month"):
+                months = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+                month_name = months[date_filter["month"] - 1]
+                date_parts.append(month_name)
+            if date_filter.get("year"):
+                date_parts.append(f"de {date_filter['year']}")
+            if date_filter.get("quarter"):
+                date_parts.append(f"Q{date_filter['quarter']}")
+            
+            if date_parts:
+                lines.append(f"Período: {' '.join(date_parts)}")
+        
+        lines.append(f"Descrição: {measure.description}")
+        
+        connection = power_bi_data.get("connection")
+        if isinstance(connection, dict):
+            process = connection.get("parentProcessName", "Power BI")
+            port = connection.get("port")
+            port_str = f" (porta {port})" if port else ""
+            lines.append(f"Conexão: {process}{port_str}")
+        
+        lines.append("Executando query para obter valor...")
+        return "\n".join(lines)
+    
+    def _format_dax_results(
+        self,
+        request: UserRequest,
+        dax_results: Any,
+        power_bi_data: dict[str, Any],
+    ) -> str | None:
+        """
+        Format the results from a DAX query execution into a readable message.
+        """
+        measure = find_matching_measure(request.message)
+        date_filter = extract_date_filter_from_query(request.message)
+        
+        if not isinstance(dax_results, dict):
+            return None
+        
+        # Extract value from results
+        value = dax_results.get("value") or dax_results.get("result")
+        if value is None:
+            rows = dax_results.get("rows", [])
+            if rows and isinstance(rows, list) and len(rows) > 0:
+                # Try to extract first row's value
+                first_row = rows[0]
+                if isinstance(first_row, dict):
+                    value = first_row.get("value") or first_row.get("Valor")
+        
+        if value is None:
+            return None
+        
+        # Format the friendly message
+        lines = []
+        
+        # Build context string
+        measure_name = measure.display_name if measure else "Medida"
+        if date_filter:
+            date_parts = []
+            if date_filter.get("month"):
+                months = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+                month_name = months[date_filter["month"] - 1]
+                date_parts.append(month_name)
+            if date_filter.get("year"):
+                date_parts.append(f"de {date_filter['year']}")
+            period = f" em {' '.join(date_parts)}" if date_parts else ""
+        else:
+            period = ""
+        
+        # Format based on value type
+        if isinstance(value, (int, float)):
+            formatted_value = f"{value:,.0f}".replace(",", ".")
+        else:
+            formatted_value = str(value)
+        
+        lines.append(f"**{measure_name}{period}**: {formatted_value}")
+        
+        # Add additional context
+        if isinstance(dax_results, dict) and dax_results.get("query"):
+            lines.append(f"(DAX Query executed successfully)")
+        
+        connection = power_bi_data.get("connection")
+        if isinstance(connection, dict):
+            title = connection.get("parentWindowTitle")
+            if title:
+                lines.append(f"Relatório: {title}")
+        
         return "\n".join(lines)
 
     def _power_bi_message(

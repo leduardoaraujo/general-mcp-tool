@@ -36,6 +36,13 @@ class HeuristicRequestUnderstandingService:
     read_terms = ("show", "list", "find", "query", "select", "read", "inspect")
     write_terms = ("insert", "update", "delete", "drop", "create", "alter", "truncate", "modify", "rename")
     side_effect_terms = ("send", "email", "publish", "refresh", "deploy", "execute")
+    # New: terms indicating user wants actual numeric values, not metadata
+    value_query_terms = (
+        "quantos", "quanto", "how many", "how much", "total", "qual", "what",
+        "qual foi", "qual é", "qual o", "quanto foi", "quanto é",
+        "em fevereiro", "em janeiro", "em", "during", "em 2026", "2026",
+        "fevereiro de", "janeiro de", "março de", "mês", "month", "ano", "year",
+    )
 
     def understand(self, request: UserRequest) -> RequestUnderstanding:
         text = self._normalize(f"{request.message} {request.domain_hint or ''}")
@@ -107,6 +114,9 @@ class HeuristicRequestUnderstandingService:
                 return TaskType.DAX_QUERY
             if self._contains_any(text, ("list", "inspect", "metadata", "tables", "measures")):
                 return TaskType.SEMANTIC_MODEL_INSPECTION
+            # Detect if user is asking for actual measure values (quantos, total, etc)
+            if self._is_value_query(text):
+                return TaskType.MEASURE_VALUE_QUERY
             return TaskType.SEMANTIC_MODEL_QUERY
         if McpTarget.POSTGRESQL in candidates or McpTarget.SQL_SERVER in candidates:
             return TaskType.SQL_QUERY
@@ -115,6 +125,17 @@ class HeuristicRequestUnderstandingService:
         if self._contains_any(text, self.docs_terms):
             return TaskType.DOCUMENTATION_LOOKUP
         return TaskType.UNKNOWN
+    
+    def _is_value_query(self, text: str) -> bool:
+        """
+        Detect if user is asking for actual measure values, not just metadata.
+        Patterns: "quantos X eu tive", "qual foi o total", "total de X", etc.
+        """
+        # Check for value query terms combined with measure-like words
+        has_value_term = self._contains_any(text, self.value_query_terms)
+        has_measure_term = self._contains_any(text, ("medida", "valor", "total", "saldo", "contratos", "movimento", "movimentacao", "distrato"))
+        
+        return has_value_term and has_measure_term
 
     def _requested_action(self, text: str, task_type: TaskType) -> RequestedAction:
         if "refresh" in text:
@@ -123,6 +144,8 @@ class HeuristicRequestUnderstandingService:
             return RequestedAction.WRITE
         if task_type == TaskType.SEMANTIC_MODEL_INSPECTION:
             return RequestedAction.INSPECT_MODEL
+        if task_type == TaskType.MEASURE_VALUE_QUERY:
+            return RequestedAction.EXECUTE_QUERY
         if task_type == TaskType.DOCUMENTATION_LOOKUP or "schema" in text:
             return RequestedAction.INSPECT_SCHEMA
         if self._contains_any(text, self.preview_terms):
@@ -141,6 +164,7 @@ class HeuristicRequestUnderstandingService:
         if task_type in {
             TaskType.SEMANTIC_MODEL_QUERY,
             TaskType.SEMANTIC_MODEL_INSPECTION,
+            TaskType.MEASURE_VALUE_QUERY,
             TaskType.DAX_QUERY,
             TaskType.SQL_QUERY,
             TaskType.COMPOSITE,

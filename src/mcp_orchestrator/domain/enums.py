@@ -16,6 +16,7 @@ class Domain(str, Enum):
 class TaskType(str, Enum):
     SEMANTIC_MODEL_QUERY = "semantic_model_query"
     SEMANTIC_MODEL_INSPECTION = "semantic_model_inspection"
+    MEASURE_VALUE_QUERY = "measure_value_query"
     DAX_QUERY = "dax_query"
     SQL_QUERY = "sql_query"
     TABULAR_EXTRACTION = "tabular_extraction"
@@ -54,6 +55,7 @@ class RequestedAction(str, Enum):
     INSPECT_SCHEMA = "inspect_schema"
     INSPECT_MODEL = "inspect_model"
     GENERATE_QUERY = "generate_query"
+    EXECUTE_QUERY = "execute_query"
     REFRESH = "refresh"
     UNKNOWN = "unknown"
 
