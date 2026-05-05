@@ -8,19 +8,45 @@ from mcp_orchestrator.infrastructure.mcp_servers import LocalMcpServerCatalog
 from mcp_orchestrator.main import create_app
 
 
+def create_fake_power_bi_mcp(root: Path) -> None:
+    package_dir = root / "powerbi-modeling-mcp"
+    package_json = (
+        package_dir
+        / "node_modules"
+        / "@microsoft"
+        / "powerbi-modeling-mcp"
+        / "package.json"
+    )
+    executable = (
+        package_dir
+        / "node_modules"
+        / "@microsoft"
+        / "powerbi-modeling-mcp-win32-x64"
+        / "dist"
+        / "powerbi-modeling-mcp.exe"
+    )
+    package_json.parent.mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    package_json.write_text(
+        '{"name": "@microsoft/powerbi-modeling-mcp", "version": "0.5.0-beta.5"}',
+        encoding="utf-8",
+    )
+    executable.write_text("fake executable", encoding="utf-8")
+
+
 def test_catalog_discovers_local_postgresql_server() -> None:
     catalog = LocalMcpServerCatalog(Path("mcps"))
 
     status = catalog.status()
 
-    assert status["server_count"] >= 2
+    assert status["server_count"] >= 1
     names = {server["name"] for server in status["servers"]}
     assert "postgresql" in names
-    assert "power_bi" in names
 
 
-def test_catalog_marks_power_bi_as_npm_server() -> None:
-    catalog = LocalMcpServerCatalog(Path("mcps"))
+def test_catalog_marks_power_bi_as_npm_server(tmp_path: Path) -> None:
+    create_fake_power_bi_mcp(tmp_path)
+    catalog = LocalMcpServerCatalog(tmp_path)
 
     servers = catalog.status()["servers"]
     power_bi = next(server for server in servers if server["name"] == "power_bi")
@@ -30,8 +56,9 @@ def test_catalog_marks_power_bi_as_npm_server() -> None:
     assert "powerbi-modeling-mcp" in power_bi["command"]
 
 
-def test_catalog_accepts_powerbi_alias() -> None:
-    catalog = LocalMcpServerCatalog(Path("mcps"))
+def test_catalog_accepts_powerbi_alias(tmp_path: Path) -> None:
+    create_fake_power_bi_mcp(tmp_path)
+    catalog = LocalMcpServerCatalog(tmp_path)
 
     server = catalog.get("powerbi")
 
@@ -65,4 +92,4 @@ def test_api_exposes_mcp_servers_status() -> None:
     response = client.get("/mcp-servers/status")
 
     assert response.status_code == 200
-    assert response.json()["server_count"] >= 2
+    assert response.json()["server_count"] >= 1

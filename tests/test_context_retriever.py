@@ -36,3 +36,15 @@ def test_context_retriever_scores_and_filters_postgresql_context() -> None:
     assert result.items
     assert all("postgresql" in item.tags for item in result.items)
     assert result.items[0].score > 0
+
+
+def test_context_retriever_validates_business_rule_headers() -> None:
+    retriever = LocalContextRetriever(Path("docs/context"))
+
+    business_rules = retriever.status()["business_rules"]
+
+    assert business_rules["rule_count"] >= 2
+    assert business_rules["invalid_count"] == 0
+    assert all(rule["valid"] for rule in business_rules["rules"])
+    assert any(rule["domain"] == "postgresql" for rule in business_rules["rules"])
+    assert any(rule["domain"] == "power_bi" for rule in business_rules["rules"])

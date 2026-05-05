@@ -84,11 +84,14 @@ class OrchestratorProxyClient:
         domain_hint: str | None = None,
         tags: list[str] | None = None,
         allow_execution: bool = False,
+        confirmation_id: str | None = None,
         include_debug: bool = False,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {}
         if allow_execution:
             metadata["allow_execution"] = True
+        if confirmation_id:
+            metadata["confirmation_id"] = confirmation_id
 
         payload = {
             "message": message,
@@ -100,6 +103,25 @@ class OrchestratorProxyClient:
         if not result["ok"]:
             return result
         return self._format_orchestrate_response(result["data"], include_debug=include_debug)
+
+    async def execute_confirmation(
+        self,
+        confirmation_id: str,
+        *,
+        include_debug: bool = False,
+    ) -> dict[str, Any]:
+        result = await self._request("POST", f"/confirmations/{confirmation_id}/execute")
+        if not result["ok"]:
+            return result
+        data = result["data"]
+        response = data.get("response", {})
+        if isinstance(response, dict):
+            formatted = self._format_orchestrate_response(response, include_debug=include_debug)
+        else:
+            formatted = {"ok": False, "error": "Invalid confirmation response."}
+        formatted["confirmation_id"] = data.get("confirmation_id", confirmation_id)
+        formatted["confirmation_status"] = data.get("status")
+        return formatted
 
     async def call_powerbi_tool(
         self,
@@ -195,6 +217,7 @@ class OrchestratorProxyClient:
             "warnings": data.get("warnings", []),
             "errors": data.get("errors", []),
             "next_actions": data.get("next_actions", []),
+            "confirmation_id": data.get("confirmation_id"),
             "specialist_results": data.get("specialist_results", []),
             "mcp_trace": data.get("mcp_trace", []),
             "timings": data.get("timings", {}),
@@ -239,6 +262,7 @@ def create_mcp_server(
         domain_hint: str | None = None,
         tags: list[str] | None = None,
         allow_execution: bool = False,
+        confirmation_id: str | None = None,
         include_debug: bool = False,
     ) -> dict[str, Any]:
         """Send a contextual request to the MCP Orchestrator API."""
@@ -247,6 +271,18 @@ def create_mcp_server(
             domain_hint=domain_hint,
             tags=tags,
             allow_execution=allow_execution,
+            confirmation_id=confirmation_id,
+            include_debug=include_debug,
+        )
+
+    @server.tool()
+    async def execute_confirmation(
+        confirmation_id: str,
+        include_debug: bool = False,
+    ) -> dict[str, Any]:
+        """Execute a pending read-only confirmation through the MCP Orchestrator API."""
+        return await proxy_client.execute_confirmation(
+            confirmation_id,
             include_debug=include_debug,
         )
 

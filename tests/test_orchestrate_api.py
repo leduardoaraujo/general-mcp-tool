@@ -19,6 +19,32 @@ from mcp_orchestrator.main import create_app
 from mcp_orchestrator.normalization import DefaultResponseNormalizer
 
 
+def create_fake_power_bi_mcp(root: Path) -> None:
+    package_dir = root / "powerbi-modeling-mcp"
+    package_json = (
+        package_dir
+        / "node_modules"
+        / "@microsoft"
+        / "powerbi-modeling-mcp"
+        / "package.json"
+    )
+    executable = (
+        package_dir
+        / "node_modules"
+        / "@microsoft"
+        / "powerbi-modeling-mcp-win32-x64"
+        / "dist"
+        / "powerbi-modeling-mcp.exe"
+    )
+    package_json.parent.mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    package_json.write_text(
+        '{"name": "@microsoft/powerbi-modeling-mcp", "version": "0.5.0-beta.5"}',
+        encoding="utf-8",
+    )
+    executable.write_text("fake executable", encoding="utf-8")
+
+
 class FakeToolRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
@@ -52,8 +78,9 @@ def test_health_endpoint() -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_orchestrate_endpoint_returns_normalized_response() -> None:
-    server_catalog = LocalMcpServerCatalog(Path("mcps"))
+def test_orchestrate_endpoint_returns_normalized_response(tmp_path: Path) -> None:
+    create_fake_power_bi_mcp(tmp_path)
+    server_catalog = LocalMcpServerCatalog(tmp_path)
     tool_runner = FakeToolRunner()
     service = OrchestrationService(
         interpreter=HeuristicRequestInterpreter(),

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orquestra MCP</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">OM</div>
+          <div>
+            <h1>Orquestra MCP</h1>
+            <p id="healthStatus">conectando...</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h2>Destino</h2>
+          <div class="segmented" role="radiogroup" aria-label="Destino">
+            <button class="segment active" data-domain="power_bi" type="button">Power BI</button>
+            <button class="segment" data-domain="postgresql" type="button">Postgres</button>
+            <button class="segment" data-domain="" type="button">Auto</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Execucao</h2>
+          <label class="toggle">
+            <input id="allowExecution" type="checkbox" />
+            <span>permitir leitura</span>
+          </label>
+          <label class="field">
+            <span>confirmation_id</span>
+            <input id="confirmationInput" autocomplete="off" placeholder="pendente" />
+          </label>
+        </section>
+
+        <section class="panel status-panel">
+          <h2>MCPs</h2>
+          <div id="serverStatus" class="status-list"></div>
+        </section>
+      </aside>
+
+      <main class="chat-main">
+        <header class="topbar">
+          <div>
+            <h2>Chat de analise</h2>
+            <p>Power BI Desktop e PostgreSQL com governanca local.</p>
+          </div>
+          <button id="clearChat" class="icon-button" type="button" title="Limpar conversa">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <section id="messages" class="messages" aria-live="polite"></section>
+
+        <form id="chatForm" class="composer">
+          <textarea
+            id="messageInput"
+            rows="3"
+            placeholder="Pergunte sobre medidas, tabelas, DAX, SQL preview ou leitura confirmada..."
+            required
+          ></textarea>
+          <div class="composer-actions">
+            <button id="confirmButton" class="secondary" type="button" disabled>Executar confirmacao</button>
+            <button class="primary" type="submit">Enviar</button>
+          </div>
+        </form>
+      </main>
+
+      <aside class="details">
+        <section class="panel">
+          <h2>Ultima execucao</h2>
+          <dl class="meta-grid">
+            <dt>Status</dt>
+            <dd id="lastStatus">-</dd>
+            <dt>Correlation</dt>
+            <dd id="lastCorrelation">-</dd>
+            <dt>Confirmacao</dt>
+            <dd id="lastConfirmation">-</dd>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <h2>Fontes</h2>
+          <ul id="sourcesList" class="source-list"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Trace</h2>
+          <pre id="traceOutput">Aguardando primeira mensagem.</pre>
+        </section>
+      </aside>
+    </div>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>

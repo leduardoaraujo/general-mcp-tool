@@ -62,6 +62,23 @@ Write, refresh, model mutation, or side-effecting requests are blocked before a
 specialist MCP is called. The policy decision is included in
 `debug.orchestration_trace`.
 
+Read-only execution now requires an explicit confirmation flow. A safe preview
+for a read-only request returns `confirmation_id`; execution only proceeds when
+the caller sends both `metadata.allow_execution=true` and that pending
+`confirmation_id`, or calls the confirmation execution endpoint.
+
+Audit events and confirmations are persisted to SQLite. The default database is:
+
+```text
+data/orchestrator.sqlite3
+```
+
+Override it with:
+
+```powershell
+$env:MCP_ORCHESTRATOR_AUDIT_DB = "C:\path\to\orchestrator.sqlite3"
+```
+
 ## Requirements
 
 - Python 3.11+
@@ -69,6 +86,17 @@ specialist MCP is called. The policy decision is included in
 - PostgreSQL MCP environment variables when calling the real PostgreSQL MCP tools
 - A local SQL Server MCP server folder when calling SQL Server tools live
 - Power BI Desktop, Fabric, or PBIP setup when calling the real Power BI Modeling MCP tools live
+
+Optional OpenAI request understanding:
+
+```powershell
+$env:MCP_ORCHESTRATOR_INTELLIGENCE_MODE = "openai"
+$env:OPENAI_API_KEY = "..."
+$env:OPENAI_MODEL = "gpt-5-mini"
+```
+
+If OpenAI is not configured or a request fails, the orchestrator falls back to
+the local heuristic interpreter.
 
 ## Installation
 
@@ -107,6 +135,12 @@ Default URL:
 
 ```text
 http://127.0.0.1:8000
+```
+
+The local chat UI is served by the same FastAPI app:
+
+```text
+http://127.0.0.1:8000/
 ```
 
 ## Run The MCP Client Proxy
@@ -234,9 +268,15 @@ powerbi_partition_operations
 ## API Endpoints
 
 - `GET /health`
+- `GET /`
+- `POST /chat`
+- `POST /chat/confirmations/{confirmation_id}/execute`
 - `POST /orchestrate`
 - `GET /docs-index/status`
 - `POST /docs-index/rebuild`
+- `GET /business-rules/status`
+- `GET /audit/{correlation_id}`
+- `POST /confirmations/{confirmation_id}/execute`
 - `GET /mcp-servers/status`
 - `GET /mcp-servers/{server_name}/tools`
 - `POST /mcp-servers/{server_name}/tools/{tool_name}`
@@ -318,6 +358,27 @@ docs/context/
   technical_docs/
   examples/
   playbooks/
+```
+
+Business rules are versioned Markdown files under:
+
+```text
+docs/context/business_rules/<domain>/<rule_id>.md
+```
+
+Each rule must include these headers:
+
+```text
+Rule ID
+Domain
+Tags
+Applies To
+Business Definition
+Data Sources
+SQL/DAX Guidance
+Validation Notes
+Owner
+Last Reviewed
 ```
 
 Override it with:

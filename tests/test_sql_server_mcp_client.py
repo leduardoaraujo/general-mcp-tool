@@ -59,13 +59,17 @@ class FakeRunner:
 def build_sql_server_specialist_request(
     *,
     allow_execution: bool = False,
+    confirmation_id: str | None = None,
     message: str = "Use SQL Server to prepare monthly sales revenue SQL.",
 ):
+    metadata = {"allow_execution": allow_execution} if allow_execution else {}
+    if confirmation_id:
+        metadata["confirmation_id"] = confirmation_id
     user_request = UserRequest(
         message=message,
         domain_hint="sql server",
         tags=["sales", "sql_server"],
-        metadata={"allow_execution": allow_execution} if allow_execution else {},
+        metadata=metadata,
     )
     understanding = HeuristicRequestInterpreter().understand(user_request)
     enriched = DefaultContextComposer().compose(
@@ -121,6 +125,7 @@ def test_router_allows_sql_server_auto_execute_only_when_policy_allows() -> None
     preview_request = build_sql_server_specialist_request(allow_execution=True)
     read_request = build_sql_server_specialist_request(
         allow_execution=True,
+        confirmation_id="confirmation-1",
         message="Read rows from SQL Server sales_orders.",
     )
 

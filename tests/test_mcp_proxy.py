@@ -35,6 +35,7 @@ async def test_ask_orchestrator_posts_contextual_request_without_debug_by_defaul
                 "warnings": [],
                 "errors": [],
                 "next_actions": ["review"],
+                "confirmation_id": "confirmation-1",
                 "specialist_results": [{"mcp_name": "power_bi"}],
                 "mcp_trace": ["routed to power_bi"],
                 "timings": {"total": 1.2},
@@ -59,6 +60,7 @@ async def test_ask_orchestrator_posts_contextual_request_without_debug_by_defaul
     assert result["ok"] is True
     assert result["summary"] == "ok"
     assert result["structured_data"] == {"answer": 42}
+    assert result["confirmation_id"] == "confirmation-1"
     assert "debug" not in result
 
 
@@ -81,11 +83,45 @@ async def test_ask_orchestrator_can_allow_execution_and_include_debug() -> None:
     result = await build_client(httpx.MockTransport(handler)).ask(
         message="execute uma consulta somente leitura",
         allow_execution=True,
+        confirmation_id="confirmation-1",
         include_debug=True,
     )
 
-    assert requests[0]["metadata"] == {"allow_execution": True}
+    assert requests[0]["metadata"] == {
+        "allow_execution": True,
+        "confirmation_id": "confirmation-1",
+    }
     assert result["debug"] == {"orchestration_trace": {"request_id": "request-2"}}
+
+
+@pytest.mark.asyncio
+async def test_execute_confirmation_posts_to_confirmation_endpoint() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={
+                "confirmation_id": "confirmation-1",
+                "status": "executed",
+                "response": {
+                    "correlation_id": "request-3",
+                    "status": "success",
+                    "summary": "ok",
+                    "confirmation_id": "confirmation-1",
+                },
+            },
+        )
+
+    result = await build_client(httpx.MockTransport(handler)).execute_confirmation(
+        "confirmation-1"
+    )
+
+    assert requests == ["/confirmations/confirmation-1/execute"]
+    assert result["ok"] is True
+    assert result["confirmation_id"] == "confirmation-1"
+    assert result["confirmation_status"] == "executed"
 
 
 @pytest.mark.asyncio
@@ -201,6 +237,7 @@ async def test_mcp_server_registers_one_proxy_tool_for_each_power_bi_tool() -> N
     tool_names = {tool.name for tool in await create_mcp_server().list_tools()}
 
     assert "ask_orchestrator" in tool_names
+    assert "execute_confirmation" in tool_names
     assert "orchestrator_health" in tool_names
     for tool_name in POWERBI_TOOL_NAMES:
         assert f"powerbi_{tool_name}" in tool_names

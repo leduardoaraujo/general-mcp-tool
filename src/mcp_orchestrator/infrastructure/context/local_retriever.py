@@ -20,6 +20,19 @@ class IndexedChunk:
 
 
 class LocalContextRetriever:
+    required_business_rule_fields = (
+        "Rule ID",
+        "Domain",
+        "Tags",
+        "Applies To",
+        "Business Definition",
+        "Data Sources",
+        "SQL/DAX Guidance",
+        "Validation Notes",
+        "Owner",
+        "Last Reviewed",
+    )
+
     def __init__(self, docs_dir: Path, *, chunk_size: int = 900) -> None:
         self.docs_dir = docs_dir
         self.chunk_size = chunk_size
@@ -41,6 +54,7 @@ class LocalContextRetriever:
             "docs_dir": str(self.docs_dir),
             "document_count": len(self.documents),
             "chunk_count": len(self.chunks),
+            "business_rules": self._business_rules_status(),
         }
 
     def retrieve(
@@ -98,7 +112,12 @@ class LocalContextRetriever:
         overlap = query_tokens.intersection(chunk.tokens)
         if not overlap:
             return 0.0
-        return round(len(overlap) / len(query_tokens), 4)
+        score = len(overlap) / len(query_tokens)
+        if "schema" in query_tokens and chunk.document.document_type == DocumentType.SCHEMA:
+            score += 0.1
+        if "rule" in query_tokens and chunk.document.document_type == DocumentType.BUSINESS_RULE:
+            score += 0.1
+        return round(score, 4)
 
     def _tokens(self, text: str) -> set[str]:
         return {
@@ -111,6 +130,41 @@ class LocalContextRetriever:
         if isinstance(value, Domain | DocumentType):
             return value.value
         return str(value)
+
+    def _business_rules_status(self) -> dict[str, Any]:
+        rules = [
+            document
+            for document in self.documents
+            if document.document_type == DocumentType.BUSINESS_RULE
+        ]
+        validations = [self._validate_business_rule(document) for document in rules]
+        invalid = [item for item in validations if item["missing_fields"]]
+        return {
+            "required_fields": list(self.required_business_rule_fields),
+            "rule_count": len(rules),
+            "valid_count": len(validations) - len(invalid),
+            "invalid_count": len(invalid),
+            "rules": validations,
+        }
+
+    def _validate_business_rule(self, document: LoadedDocument) -> dict[str, Any]:
+        found = {
+            line.split(":", 1)[0].strip()
+            for line in document.content.splitlines()
+            if ":" in line and not line.startswith("#")
+        }
+        missing = [
+            field
+            for field in self.required_business_rule_fields
+            if field not in found
+        ]
+        return {
+            "source_path": str(document.source_path),
+            "domain": document.domain.value if document.domain else None,
+            "tags": document.tags,
+            "missing_fields": missing,
+            "valid": not missing,
+        }
 
 
 TextualRagRetriever = LocalContextRetriever

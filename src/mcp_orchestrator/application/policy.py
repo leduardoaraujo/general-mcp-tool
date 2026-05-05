@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from mcp_orchestrator.domain.enums import RequestedAction, RiskLevel, SafetyLevel
 from mcp_orchestrator.domain.models import (
     EnrichedRequest,
@@ -28,6 +30,13 @@ class DefaultExecutionPolicyService:
             return self._blocked_decision(enriched_request, write=write, side_effects=side_effects)
 
         if read_only and allow_execution_requested:
+            if not enriched_request.metadata.get("confirmation_id"):
+                return self._blocked_decision(
+                    enriched_request,
+                    write=False,
+                    side_effects=False,
+                    reason="Read-only execution requires a pending confirmation_id.",
+                )
             return self._read_execution_decision(enriched_request)
 
         return self._preview_decision(enriched_request, read_only=read_only)
@@ -51,6 +60,7 @@ class DefaultExecutionPolicyService:
             requires_confirmation=False,
             allow_execution=False,
             blocked_reason=None,
+            confirmation_id=str(uuid4()) if read_only else None,
             safety_level=SafetyLevel.SAFE,
             risk_level=enriched_request.understanding.risk_level,
             decision_reason="Preview-only execution is the default policy.",
@@ -68,6 +78,7 @@ class DefaultExecutionPolicyService:
             requires_confirmation=False,
             allow_execution=True,
             blocked_reason=None,
+            confirmation_id=str(enriched_request.metadata.get("confirmation_id")),
             safety_level=SafetyLevel.REVIEW_REQUIRED,
             risk_level=RiskLevel.MEDIUM,
             decision_reason="Request metadata explicitly allowed read-only execution.",
@@ -81,8 +92,9 @@ class DefaultExecutionPolicyService:
         *,
         write: bool,
         side_effects: bool,
+        reason: str | None = None,
     ) -> ExecutionPolicyDecision:
-        reason = "Write or side-effecting operations require a future confirmation workflow."
+        reason = reason or "Write or side-effecting operations require a future confirmation workflow."
         return ExecutionPolicyDecision(
             correlation_id=enriched_request.correlation_id,
             preview_only=False,
@@ -92,6 +104,7 @@ class DefaultExecutionPolicyService:
             requires_confirmation=True,
             allow_execution=False,
             blocked_reason=reason,
+            confirmation_id=None,
             safety_level=SafetyLevel.BLOCKED,
             risk_level=RiskLevel.HIGH,
             decision_reason=reason,

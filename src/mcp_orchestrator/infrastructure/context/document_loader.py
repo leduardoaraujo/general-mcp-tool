@@ -57,6 +57,10 @@ class LocalDocumentLoader:
         return DocumentType.UNKNOWN
 
     def _domain(self, path: Path, content: str) -> Domain | None:
+        declared_domain = self._declared_domain(content)
+        if declared_domain:
+            return declared_domain
+
         text = f"{path.as_posix()} {content}".lower()
         if "power bi" in text or "dax" in text or "semantic model" in text:
             return Domain.POWER_BI
@@ -68,6 +72,16 @@ class LocalDocumentLoader:
             return Domain.EXCEL
         if "sales" in text or "analytics" in text:
             return Domain.ANALYTICS
+        return None
+
+    def _declared_domain(self, content: str) -> Domain | None:
+        for line in content.splitlines():
+            if not line.lower().startswith("domain:"):
+                continue
+            value = line.split(":", 1)[1].strip().lower().replace("-", "_")
+            for domain in Domain:
+                if value == domain.value:
+                    return domain
         return None
 
     def _tags(self, path: Path, content: str) -> list[str]:

@@ -85,6 +85,7 @@ class ExecutionPolicyDecision(BaseModel):
     requires_confirmation: bool
     allow_execution: bool
     blocked_reason: str | None = None
+    confirmation_id: str | None = None
     safety_level: SafetyLevel
     risk_level: RiskLevel
     decision_reason: str
@@ -179,6 +180,7 @@ class NormalizedResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
+    confirmation_id: str | None = None
     timings: dict[str, float] = Field(default_factory=dict)
     debug: dict[str, Any] = Field(default_factory=dict)
 
@@ -186,6 +188,27 @@ class NormalizedResponse(BaseModel):
     @property
     def raw_outputs(self) -> list[SpecialistExecutionResult]:
         return self.specialist_results
+
+
+class ConfirmationExecutionResponse(BaseModel):
+    confirmation_id: str
+    status: str
+    response: NormalizedResponse
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    domain_hint: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatResponse(BaseModel):
+    message: str
+    orchestration: NormalizedResponse
+    confirmation_id: str | None = None
+    sources_used: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class McpToolDefinition(BaseModel):

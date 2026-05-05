@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from time import perf_counter
 from typing import Any, Protocol
@@ -190,13 +191,23 @@ class PowerBiMcpClient:
                 connection=instance,
             )
 
-        user_request = str(request.arguments.get("request") or request.enriched_request.original_request)
+        original_user_request = str(request.enriched_request.original_request)
+        user_request = "\n".join(
+            part
+            for part in [
+                original_user_request,
+                str(request.arguments.get("request") or ""),
+            ]
+            if part
+        )
         guided_data: dict[str, Any] = {
             "connection": instance,
             "requested_analysis": user_request,
         }
 
-        if self._should_list_tables(user_request):
+        summarize_model = self._should_summarize_model(original_user_request)
+
+        if self._should_list_tables(original_user_request) or summarize_model:
             tables = await caller.call_tool(
                 "table_operations",
                 {"request": {"operation": "List", "filter": {"maxResults": 200}}},
@@ -204,7 +215,43 @@ class PowerBiMcpClient:
             operations.append(self._operation_record("table_operations", tables))
             guided_data["tables"] = self._payload_data(tables)
 
-        if self._should_list_measures(user_request):
+        if self._should_list_columns(original_user_request):
+            table_names = self._matching_table_names(
+                guided_data.get("tables"),
+                original_user_request,
+            )
+            if not table_names:
+                if "tables" not in guided_data:
+                    tables = await caller.call_tool(
+                        "table_operations",
+                        {"request": {"operation": "List", "filter": {"maxResults": 200}}},
+                    )
+                    operations.append(self._operation_record("table_operations", tables))
+                    guided_data["tables"] = self._payload_data(tables)
+                table_names = self._matching_table_names(
+                    guided_data.get("tables"),
+                    original_user_request,
+                )
+
+            columns_by_table: dict[str, Any] = {}
+            for table_name in table_names[:5]:
+                columns = await caller.call_tool(
+                    "column_operations",
+                    {
+                        "request": {
+                            "operation": "List",
+                            "filter": {"tableNames": [table_name], "maxResults": 300},
+                        }
+                    },
+                )
+                operations.append(self._operation_record("column_operations", columns))
+                columns_by_table[table_name] = self._flatten_column_payload(
+                    self._payload_data(columns)
+                )
+            if columns_by_table:
+                guided_data["columns"] = columns_by_table
+
+        if self._should_list_measures(original_user_request) or summarize_model:
             measures = await caller.call_tool(
                 "measure_operations",
                 {"request": {"operation": "List", "filter": {"maxResults": 200}}},
@@ -213,8 +260,8 @@ class PowerBiMcpClient:
             measure_list = self._payload_data(measures)
             guided_data["measures"] = measure_list
 
-            matches = self._matching_measures(measure_list, user_request)
-            if matches:
+            matches = self._matching_measures(measure_list, original_user_request)
+            if matches and self._should_get_measure_definitions(original_user_request):
                 measure_definitions = await caller.call_tool(
                     "measure_operations",
                     {
@@ -229,8 +276,13 @@ class PowerBiMcpClient:
                 )
                 guided_data["matching_measures"] = matches
                 guided_data["measure_definitions"] = self._payload_data(measure_definitions)
+            elif matches:
+                guided_data["matching_measures"] = matches
 
-        if not any(key in guided_data for key in {"tables", "measures", "measure_definitions"}):
+        if not any(
+            key in guided_data
+            for key in {"tables", "measures", "measure_definitions", "columns"}
+        ):
             stats = await caller.call_tool(
                 "model_operations",
                 {"request": {"operation": "GetStats"}},
@@ -272,6 +324,13 @@ class PowerBiMcpClient:
         )
 
     def _guided_summary(self, guided_data: dict[str, Any]) -> str:
+        columns = guided_data.get("columns")
+        if isinstance(columns, dict) and columns:
+            table_name, table_columns = next(iter(columns.items()))
+            if isinstance(table_columns, list):
+                return f"Found {len(table_columns)} column(s) in table '{table_name}'."
+            return f"Retrieved columns for table '{table_name}'."
+
         definitions = guided_data.get("measure_definitions")
         if isinstance(definitions, list) and definitions:
             primary = definitions[0]
@@ -347,6 +406,70 @@ class PowerBiMcpClient:
             for token in {"measure", "measures", "medida", "medidas", "custo", "prato"}
         )
 
+    def _should_summarize_model(self, user_request: str) -> bool:
+        normalized = self._normalize(user_request)
+        return any(
+            token in normalized
+            for token in {
+                "relatorio",
+                "report",
+                "aberto",
+                "resumo",
+                "modelo semantico",
+                "semantic model",
+            }
+        )
+
+    def _should_list_columns(self, user_request: str) -> bool:
+        normalized = self._normalize(user_request)
+        return any(
+            token in normalized
+            for token in {"column", "columns", "coluna", "colunas", "campo", "campos"}
+        )
+
+    def _should_get_measure_definitions(self, user_request: str) -> bool:
+        normalized = self._normalize(user_request)
+        return any(
+            token in normalized
+            for token in {
+                "definicao",
+                "definicoes",
+                "formula",
+                "formulas",
+                "expressao",
+                "expression",
+                "dax",
+                "calculo",
+                "calculos",
+                "como foi criada",
+                "como foi feito",
+                "me mostre",
+                "mostre",
+                "mostra",
+            }
+        )
+
+    def _matching_table_names(self, tables: Any, user_request: str) -> list[str]:
+        if not isinstance(tables, list):
+            return []
+
+        tokens = set(self._search_tokens(user_request))
+        named_tables = [
+            table
+            for table in tables
+            if isinstance(table, dict) and isinstance(table.get("name"), str)
+        ]
+        exact_or_partial = [
+            table["name"]
+            for table in named_tables
+            if self._normalize(table["name"]) in self._normalize(user_request)
+            or any(token in self._normalize(table["name"]) for token in tokens)
+        ]
+        if exact_or_partial:
+            return list(dict.fromkeys(exact_or_partial))
+
+        return [table["name"] for table in named_tables[:1]]
+
     def _matching_measures(
         self,
         measures: Any,
@@ -355,21 +478,29 @@ class PowerBiMcpClient:
         if not isinstance(measures, list):
             return []
 
-        normalized_request = self._normalize(user_request)
-        tokens = [
-            token
-            for token in ("custo", "unitario", "prato")
-            if token in normalized_request
-        ]
+        tokens = self._search_tokens(user_request)
         if not tokens:
             return []
+
+        exact_phrase = self._quoted_or_after_measure_phrase(user_request)
+        if exact_phrase:
+            normalized_exact = self._normalize(exact_phrase)
+            exact_matches = [
+                measure
+                for measure in measures
+                if isinstance(measure, dict)
+                and isinstance(measure.get("name"), str)
+                and normalized_exact in self._normalize(measure["name"])
+            ]
+            if exact_matches:
+                return exact_matches
 
         candidates = [
             measure
             for measure in measures
             if isinstance(measure, dict)
             and isinstance(measure.get("name"), str)
-            and all(token in self._normalize(measure["name"]) for token in tokens)
+            and all(token in self._measure_search_text(measure) for token in tokens)
         ]
         if not candidates:
             candidates = [
@@ -377,7 +508,7 @@ class PowerBiMcpClient:
                 for measure in measures
                 if isinstance(measure, dict)
                 and isinstance(measure.get("name"), str)
-                and any(token in self._normalize(measure["name"]) for token in tokens)
+                and any(token in self._measure_search_text(measure) for token in tokens)
             ]
 
         return sorted(
@@ -387,6 +518,120 @@ class PowerBiMcpClient:
                 len(measure["name"]),
             ),
         )
+
+    def _measure_search_text(self, measure: dict[str, Any]) -> str:
+        values = [
+            measure.get("name"),
+            measure.get("description"),
+            measure.get("displayFolder"),
+            measure.get("tableName"),
+        ]
+        return " ".join(self._normalize(str(value)) for value in values if value)
+
+    def _quoted_or_after_measure_phrase(self, user_request: str) -> str | None:
+        quoted = re.search(r"['\"]([^'\"]+)['\"]", user_request)
+        if quoted:
+            return quoted.group(1).strip()
+
+        normalized = self._normalize(user_request)
+        for marker in ("medida ", "measure "):
+            index = normalized.find(marker)
+            if index >= 0:
+                phrase = user_request[index + len(marker) :].splitlines()[0].strip(" ?.!:")
+                if phrase:
+                    return phrase
+        return None
+
+    def _flatten_column_payload(self, payload: Any) -> Any:
+        if not isinstance(payload, list):
+            return payload
+
+        flattened: list[dict[str, Any]] = []
+        for item in payload:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("columns"), list)
+                and all(isinstance(column, dict) for column in item["columns"])
+            ):
+                flattened.extend(item["columns"])
+            elif isinstance(item, dict):
+                flattened.append(item)
+        return flattened
+
+    def _search_tokens(self, user_request: str) -> list[str]:
+        stopwords = {
+            "a",
+            "as",
+            "o",
+            "os",
+            "de",
+            "da",
+            "das",
+            "do",
+            "dos",
+            "e",
+            "em",
+            "me",
+            "meu",
+            "minha",
+            "minhas",
+            "qual",
+            "quais",
+            "que",
+            "sao",
+            "são",
+            "tem",
+            "todas",
+            "todos",
+            "liste",
+            "listar",
+            "mostre",
+            "mostrar",
+            "definicao",
+            "definicoes",
+            "formula",
+            "formulas",
+            "expressao",
+            "dax",
+            "medida",
+            "medidas",
+            "measure",
+            "measures",
+            "falam",
+            "fala",
+            "sobre",
+            "modelo",
+            "relatorio",
+            "power",
+            "bi",
+            "prepare",
+            "safe",
+            "semantic",
+            "model",
+            "response",
+            "enriched",
+            "request",
+            "original",
+            "user",
+            "intent",
+            "handle",
+            "task",
+            "type",
+            "requested",
+            "action",
+            "inspect",
+            "constraints",
+            "retrieved",
+            "local",
+            "context",
+        }
+        normalized = self._normalize(user_request)
+        tokens = re.findall(r"[a-z0-9_]+", normalized)
+        return [
+            token
+            for token in tokens
+            if len(token) >= 3 and token not in stopwords
+        ][:8]
 
     def _normalize(self, value: str) -> str:
         decomposed = unicodedata.normalize("NFD", value)

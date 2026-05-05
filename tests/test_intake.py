@@ -16,6 +16,17 @@ def test_power_bi_request_selects_power_bi() -> None:
     assert result.reasoning_summary
 
 
+def test_power_bi_domain_hint_with_underscore_selects_power_bi() -> None:
+    interpreter = HeuristicRequestInterpreter()
+
+    result = interpreter.interpret(
+        OrchestrateRequest(message="Liste as medidas do modelo.", domain_hint="power_bi")
+    )
+
+    assert result.candidate_mcps == [McpTarget.POWER_BI]
+    assert result.task_type == TaskType.SEMANTIC_MODEL_INSPECTION
+
+
 def test_power_bi_metadata_request_is_model_inspection() -> None:
     interpreter = HeuristicRequestInterpreter()
 

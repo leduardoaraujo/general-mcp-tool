@@ -30,7 +30,7 @@ def test_policy_defaults_postgresql_to_preview_only() -> None:
     assert decision.safety_level == SafetyLevel.SAFE
 
 
-def test_policy_allows_explicit_read_only_execution() -> None:
+def test_policy_requires_confirmation_for_explicit_read_only_execution() -> None:
     enriched = build_enriched(
         "Read rows from PostgreSQL sales_orders.",
         metadata={"allow_execution": True},
@@ -39,10 +39,37 @@ def test_policy_allows_explicit_read_only_execution() -> None:
 
     decision = DefaultExecutionPolicyService().decide(enriched, trace)
 
+    assert decision.allow_execution is False
+    assert decision.requires_confirmation is True
+    assert decision.safety_level == SafetyLevel.BLOCKED
+    assert "confirmation_id" in decision.blocked_reason
+
+
+def test_policy_allows_explicit_read_only_execution_with_confirmation() -> None:
+    enriched = build_enriched(
+        "Read rows from PostgreSQL sales_orders.",
+        metadata={"allow_execution": True, "confirmation_id": "confirmation-1"},
+    )
+    trace = OrchestrationTraceRecorder("cid").trace
+
+    decision = DefaultExecutionPolicyService().decide(enriched, trace)
+
     assert decision.preview_only is False
     assert decision.read_only is True
     assert decision.allow_execution is True
+    assert decision.confirmation_id == "confirmation-1"
     assert decision.safety_level == SafetyLevel.REVIEW_REQUIRED
+
+
+def test_policy_creates_confirmation_id_for_read_only_preview() -> None:
+    enriched = build_enriched("Read rows from PostgreSQL sales_orders.")
+    trace = OrchestrationTraceRecorder("cid").trace
+
+    decision = DefaultExecutionPolicyService().decide(enriched, trace)
+
+    assert decision.preview_only is True
+    assert decision.allow_execution is False
+    assert decision.confirmation_id
 
 
 def test_policy_blocks_write_requests() -> None:

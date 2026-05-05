@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+from typing import Any
 from collections.abc import Iterable
+
+import httpx
+from pydantic import ValidationError
 
 from mcp_orchestrator.domain.enums import Domain, McpTarget, RequestedAction, RiskLevel, TaskType
 from mcp_orchestrator.domain.models import RequestUnderstanding, UserRequest
@@ -9,6 +14,7 @@ from mcp_orchestrator.domain.models import RequestUnderstanding, UserRequest
 class HeuristicRequestUnderstandingService:
     power_bi_terms = (
         "power bi",
+        "power_bi",
         "powerbi",
         "semantic model",
         "modelo semantico",
@@ -216,3 +222,123 @@ class HeuristicRequestUnderstandingService:
 
 
 HeuristicRequestInterpreter = HeuristicRequestUnderstandingService
+
+
+class OpenAIRequestUnderstandingService:
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        model: str,
+        fallback: HeuristicRequestUnderstandingService | None = None,
+        timeout_seconds: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.fallback = fallback or HeuristicRequestUnderstandingService()
+        self.timeout_seconds = timeout_seconds
+        self.transport = transport
+
+    def understand(self, request: UserRequest) -> RequestUnderstanding:
+        if not self.api_key:
+            return self.fallback.understand(request)
+
+        try:
+            payload = self._responses_payload(request)
+            with httpx.Client(timeout=self.timeout_seconds, transport=self.transport) as client:
+                response = client.post(
+                    "https://api.openai.com/v1/responses",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                response.raise_for_status()
+            return self._parse_response(response.json(), request)
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, ValidationError):
+            return self.fallback.understand(request)
+
+    def interpret(self, request: UserRequest) -> RequestUnderstanding:
+        return self.understand(request)
+
+    def _responses_payload(self, request: UserRequest) -> dict[str, Any]:
+        schema = RequestUnderstanding.model_json_schema()
+        return {
+            "model": self.model,
+            "input": [
+                {
+                    "role": "developer",
+                    "content": (
+                        "Classify the user request for an MCP orchestrator. "
+                        "Return only fields that satisfy the provided JSON schema. "
+                        "Use the user language for reasoning_summary when useful. "
+                        "Never invent a target MCP when the request does not mention or imply one."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "message": request.message,
+                            "domain_hint": request.domain_hint,
+                            "tags": request.tags,
+                            "metadata": request.metadata,
+                            "allowed_domains": [item.value for item in Domain],
+                            "allowed_task_types": [item.value for item in TaskType],
+                            "allowed_actions": [item.value for item in RequestedAction],
+                            "allowed_targets": [item.value for item in McpTarget],
+                            "allowed_risk_levels": [item.value for item in RiskLevel],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "request_understanding",
+                    "schema": schema,
+                    "strict": True,
+                }
+            },
+        }
+
+    def _parse_response(
+        self,
+        payload: dict[str, Any],
+        request: UserRequest,
+    ) -> RequestUnderstanding:
+        text = self._extract_output_text(payload)
+        data = json.loads(text)
+        data.setdefault("original_request", request.message)
+        return RequestUnderstanding.model_validate(data)
+
+    def _extract_output_text(self, payload: dict[str, Any]) -> str:
+        output_text = payload.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text
+
+        output = payload.get("output", [])
+        if not isinstance(output, list):
+            raise ValueError("OpenAI response output is not a list.")
+
+        parts: list[str] = []
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content", [])
+            if not isinstance(content, list):
+                continue
+            for content_item in content:
+                if not isinstance(content_item, dict):
+                    continue
+                text = content_item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+
+        joined = "".join(parts).strip()
+        if not joined:
+            raise ValueError("OpenAI response did not include output text.")
+        return joined
