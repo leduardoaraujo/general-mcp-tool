@@ -1,5 +1,16 @@
 ﻿# Base Documental - Modelo Semântico DRE - Hotelaria
 
+Rule ID: PBI-DRE-HOTELARIA-SEMANTIC-MODEL-001
+Domain: power_bi
+Tags: power_bi, dre, hotelaria, gop, margem, semantic_model
+Applies To: DRE - Hotelaria (Power BI Desktop/Fabric)
+Business Definition: Base semântica de regras de DRE e hotelaria para resposta analítica orientada a decisão.
+Data Sources: Modelo local DRE - Hotelaria + medidas externas via EXTERNALMEASURE.
+SQL/DAX Guidance: Priorizar medidas explícitas do modelo (especialmente DRE/GOP/Farol) e consultas DAX read-only com contexto temporal.
+Validation Notes: Confirmar medida exata solicitada, unidade (%/valor), período e base comparativa antes de responder.
+Owner: BI / Controladoria Hotelaria
+Last Reviewed: 2026-05-06
+
 Data de extração: 2026-05-06  
 Fonte: MCP Power BI (`mcp_servers.powerbi`) conectado ao relatório aberto `DRE - Hotelaria`
 

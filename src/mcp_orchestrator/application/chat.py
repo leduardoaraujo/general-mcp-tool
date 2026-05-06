@@ -823,6 +823,22 @@ class ChatAnswerService:
 
     def _is_analytical_query(self, message: str) -> bool:
         normalized = self._clean_text(message).lower()
+        if any(
+            token in normalized
+            for token in {
+                "o que e",
+                "o que é",
+                "oque e",
+                "oque é",
+                "significa",
+                "conceito",
+                "onde aplico",
+                "como aplicar",
+                "para que serve",
+                "pra que serve",
+            }
+        ):
+            return False
         if self._asks_for_analytical_value(message):
             return True
         return any(

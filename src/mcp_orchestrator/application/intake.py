@@ -180,6 +180,22 @@ class HeuristicRequestUnderstandingService:
         if self._contains_any(
             text,
             (
+                "o que e",
+                "o que é",
+                "oque e",
+                "oque é",
+                "significa",
+                "conceito",
+                "onde aplico",
+                "como aplicar",
+                "para que serve",
+                "pra que serve",
+            ),
+        ):
+            return False
+        if self._contains_any(
+            text,
+            (
                 "semantic model",
                 "modelo semantico",
                 "modelo semântico",

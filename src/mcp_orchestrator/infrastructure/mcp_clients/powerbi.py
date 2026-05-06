@@ -964,6 +964,14 @@ ROW(
                 "me mostre",
                 "mostre",
                 "mostra",
+                "o que e",
+                "oque e",
+                "significa",
+                "conceito",
+                "onde aplico",
+                "como aplicar",
+                "para que serve",
+                "pra que serve",
             }
         )
 
@@ -1063,11 +1071,29 @@ ROW(
         request: SpecialistExecutionRequest,
     ) -> bool:
         user_request = request.enriched_request.original_request
+        if self._is_explanatory_request(user_request):
+            return False
         return (
             request.enriched_request.understanding.task_type == TaskType.MEASURE_VALUE_QUERY
             or self._is_measure_value_request(user_request)
             or self._is_comparison_request(user_request)
             or self._is_ranking_query(request.enriched_request.original_request)
+        )
+
+    def _is_explanatory_request(self, user_request: str) -> bool:
+        normalized = self._normalize(user_request)
+        return any(
+            token in normalized
+            for token in {
+                "o que e",
+                "oque e",
+                "significa",
+                "conceito",
+                "onde aplico",
+                "como aplicar",
+                "para que serve",
+                "pra que serve",
+            }
         )
 
     def _is_measure_value_request(self, user_request: str) -> bool:

@@ -100,11 +100,30 @@ class LocalContextRetriever:
 
         tags = filters.get("tags") or []
         if tags:
-            requested = {str(tag).lower() for tag in tags}
-            if not requested.intersection(chunk.document.tags):
+            requested = self._expanded_tag_set(tags)
+            available = self._expanded_tag_set(chunk.document.tags)
+            if not requested.intersection(available):
                 return False
 
         return True
+
+    def _expanded_tag_set(self, tags: list[Any]) -> set[str]:
+        expanded: set[str] = set()
+        for raw in tags:
+            value = str(raw).strip().lower()
+            if not value:
+                continue
+            expanded.add(value)
+            expanded.add(value.replace("-", "_"))
+            expanded.add(value.replace("_", "-"))
+            expanded.add(value.replace("_", " "))
+            if "_" in value:
+                expanded.update(part for part in value.split("_") if part)
+            if "-" in value:
+                expanded.update(part for part in value.split("-") if part)
+            if " " in value:
+                expanded.update(part for part in value.split(" ") if part)
+        return expanded
 
     def _score(self, query_tokens: set[str], chunk: IndexedChunk) -> float:
         if not query_tokens:
