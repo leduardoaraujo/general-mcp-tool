@@ -162,6 +162,7 @@ def test_orchestrate_postgresql_request_returns_traceable_specialist_response() 
     assert trace["selected_target_mcps"] == ["postgresql"]
     assert trace["policy_decision"]["preview_only"] is True
     assert trace["retrieved_context_sources"]
+    assert "execution_trace_sections" in body["debug"]
 
 
 def test_docs_index_rebuild_updates_status() -> None:

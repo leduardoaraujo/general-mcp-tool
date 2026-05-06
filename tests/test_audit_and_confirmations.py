@@ -84,6 +84,7 @@ def test_audit_endpoint_returns_recorded_orchestration(tmp_path: Path) -> None:
     assert audit.status_code == 200
     assert audit.json()["correlation_id"] == correlation_id
     assert audit.json()["payload"]["request"]["domain_hint"] == "postgresql"
+    assert "execution_traces" in audit.json()
 
 
 def test_confirmation_endpoint_executes_pending_read_only_request(tmp_path: Path) -> None:

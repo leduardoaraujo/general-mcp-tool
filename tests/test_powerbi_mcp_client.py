@@ -102,6 +102,8 @@ class FakeSessionCaller:
                     {"name": "Total Custo"},
                     {"name": "Propostas VGV"},
                     {"name": "Propostas VGV Filtro 2"},
+                    {"name": "VGV Vendido"},
+                    {"name": "Mega Meta VGV"},
                 ],
             },
             ("measure_operations", "Get"): {
@@ -315,6 +317,57 @@ async def test_power_bi_client_executes_ranking_validation_query() -> None:
     assert result.structured_data["ranking_analysis"]["entity_name"] == "THIAGO MORAES BARBOSA"
     assert result.structured_data["ranking_analysis"]["top_entity_name"] == "KESLEY MARTINS COSTA"
     assert result.structured_data["ranking_analysis"]["entity_rank"] == 160
+
+
+@pytest.mark.asyncio
+async def test_power_bi_client_executes_measure_value_query_by_text_intent() -> None:
+    runner = FakeSessionRunner()
+    client = PowerBiMcpClient(
+        server_catalog=FakeCatalog(),
+        tool_runner=runner,
+    )  # type: ignore[arg-type]
+    request = build_power_bi_specialist_request(
+        message="qual o numero que Mega Meta VGV retorna?",
+    )
+
+    result = await client.execute(request)
+
+    assert result.status == ResultStatus.SUCCESS
+    assert [call[0] for call in runner.calls] == [
+        "connection_operations",
+        "connection_operations",
+        "measure_operations",
+        "dax_query_operations",
+    ]
+    assert "dax_query_results" in result.structured_data
+    assert result.structured_data["dax_query_results"]["value"] is not None
+
+
+@pytest.mark.asyncio
+async def test_power_bi_client_executes_comparison_query_for_meta_requests() -> None:
+    runner = FakeSessionRunner()
+    client = PowerBiMcpClient(
+        server_catalog=FakeCatalog(),
+        tool_runner=runner,
+    )  # type: ignore[arg-type]
+    request = build_power_bi_specialist_request(
+        message="compara com o Mega Meta VGV",
+    )
+
+    result = await client.execute(request)
+
+    assert result.status == ResultStatus.SUCCESS
+    assert [call[0] for call in runner.calls] == [
+        "connection_operations",
+        "connection_operations",
+        "measure_operations",
+        "dax_query_operations",
+    ]
+    assert "dax_query_results" in result.structured_data
+    assert result.structured_data["intent_detected"] == "comparacao"
+    query = result.structured_data["dax_query_results"]["query"]
+    assert "ComparisonValue" in query
+    assert "[Mega Meta VGV]" in query
 
 
 @pytest.mark.asyncio

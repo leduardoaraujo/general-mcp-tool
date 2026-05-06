@@ -7,33 +7,54 @@
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
     <div class="app-shell">
-      <aside class="sidebar">
+      <aside class="sidebar" id="leftSidebar">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">OM</div>
-          <div>
+          <div class="brand-copy">
             <h1>Orquestra MCP</h1>
-            <p id="healthStatus">conectando...</p>
+            <p id="healthStatus">Conectando...</p>
           </div>
+          <button id="toggleLeftSidebar" class="icon-button icon-button-ghost" type="button" title="Recolher menu esquerdo" aria-label="Recolher menu esquerdo">
+            <svg class="icon"><use href="/static/icons.svg#chevrons-left"></use></svg>
+          </button>
         </div>
 
         <section class="panel">
           <h2>Destino</h2>
           <div class="segmented" role="radiogroup" aria-label="Destino">
-            <button class="segment active" data-domain="power_bi" type="button">Power BI</button>
-            <button class="segment" data-domain="postgresql" type="button">Postgres</button>
-            <button class="segment" data-domain="" type="button">Auto</button>
+            <button class="segment active" data-domain="power_bi" type="button">
+              <svg class="icon"><use href="/static/icons.svg#chart"></use></svg>
+              <span>Power BI</span>
+            </button>
+            <button class="segment" data-domain="postgresql" type="button">
+              <svg class="icon"><use href="/static/icons.svg#database"></use></svg>
+              <span>Postgres</span>
+            </button>
+            <button class="segment" data-domain="" type="button">
+              <svg class="icon"><use href="/static/icons.svg#sparkles"></use></svg>
+              <span>Auto</span>
+            </button>
           </div>
         </section>
 
         <section class="panel">
-          <h2>Execucao</h2>
+          <h2>Execução</h2>
+          <label class="field">
+            <span>Perfil de resposta</span>
+            <select id="responseProfile">
+              <option value="business" selected>Business</option>
+              <option value="creator">Creator</option>
+            </select>
+          </label>
           <label class="toggle">
             <input id="allowExecution" type="checkbox" />
-            <span>permitir leitura</span>
+            <span>Permitir leitura</span>
           </label>
           <label class="field">
-            <span>confirmation_id</span>
+            <span>ID de confirmação</span>
             <input id="confirmationInput" autocomplete="off" placeholder="pendente" />
           </label>
         </section>
@@ -47,11 +68,11 @@
       <main class="chat-main">
         <header class="topbar">
           <div>
-            <h2>Chat de analise</h2>
-            <p>Power BI Desktop e PostgreSQL com governanca local.</p>
+            <h2>Chat de Análise</h2>
+            <p>Power BI Desktop e PostgreSQL com governança local.</p>
           </div>
-          <button id="clearChat" class="icon-button" type="button" title="Limpar conversa">
-            <span aria-hidden="true">×</span>
+          <button id="clearChat" class="icon-button" type="button" title="Limpar conversa" aria-label="Limpar conversa">
+            <svg class="icon"><use href="/static/icons.svg#x"></use></svg>
           </button>
         </header>
 
@@ -65,33 +86,63 @@
             required
           ></textarea>
           <div class="composer-actions">
-            <button id="confirmButton" class="secondary" type="button" disabled>Executar confirmacao</button>
-            <button class="primary" type="submit">Enviar</button>
+            <button id="confirmButton" class="secondary" type="button" disabled>
+              <svg class="icon"><use href="/static/icons.svg#shield-check"></use></svg>
+              <span>Executar confirmação</span>
+            </button>
+            <button id="sendButton" class="primary" type="submit">
+              <svg class="icon"><use href="/static/icons.svg#send"></use></svg>
+              <span>Enviar</span>
+            </button>
           </div>
         </form>
       </main>
 
-      <aside class="details">
-        <section class="panel">
-          <h2>Ultima execucao</h2>
+      <aside class="details" id="rightSidebar">
+        <section class="panel details-head">
+          <div class="details-tabs" role="tablist" aria-label="Painel lateral">
+            <button class="details-tab active" id="tabExecution" data-panel="execution" type="button">
+              <svg class="icon"><use href="/static/icons.svg#activity"></use></svg>
+              <span>Execução</span>
+            </button>
+            <button class="details-tab" id="tabSources" data-panel="sources" type="button">
+              <svg class="icon"><use href="/static/icons.svg#book"></use></svg>
+              <span>Fontes</span>
+            </button>
+            <button class="details-tab" id="tabTrace" data-panel="trace" type="button">
+              <svg class="icon"><use href="/static/icons.svg#list"></use></svg>
+              <span>Trace</span>
+            </button>
+          </div>
+          <button id="toggleRightSidebar" class="icon-button icon-button-ghost" type="button" title="Recolher painel direito" aria-label="Recolher painel direito">
+            <svg class="icon"><use href="/static/icons.svg#chevrons-right"></use></svg>
+          </button>
+        </section>
+
+        <section class="panel details-panel active" data-panel="execution">
+          <h2>Última execução</h2>
           <dl class="meta-grid">
             <dt>Status</dt>
             <dd id="lastStatus">-</dd>
             <dt>Correlation</dt>
             <dd id="lastCorrelation">-</dd>
-            <dt>Confirmacao</dt>
+            <dt>Confirmação</dt>
             <dd id="lastConfirmation">-</dd>
+            <dt>Relatório</dt>
+            <dd id="lastReport">-</dd>
+            <dt>Instância</dt>
+            <dd id="lastInstance">-</dd>
           </dl>
         </section>
 
-        <section class="panel">
+        <section class="panel details-panel" data-panel="sources">
           <h2>Fontes</h2>
           <ul id="sourcesList" class="source-list"></ul>
         </section>
 
-        <section class="panel">
+        <section class="panel details-panel" data-panel="trace">
           <h2>Trace</h2>
-          <pre id="traceOutput">Aguardando primeira mensagem.</pre>
+          <div id="traceOutput" class="trace-root">Aguardando primeira mensagem.</div>
         </section>
       </aside>
     </div>

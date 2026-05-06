@@ -84,6 +84,10 @@ class HeuristicRequestUnderstandingService:
         "lidera",
         "verifica",
         "validar",
+        "margem",
+        "percentual",
+        "%",
+        "gop",
     )
 
     def understand(self, request: UserRequest) -> RequestUnderstanding:
@@ -199,6 +203,10 @@ class HeuristicRequestUnderstandingService:
                 "medida",
                 "valor",
                 "total",
+                "margem",
+                "percentual",
+                "%",
+                "gop",
                 "saldo",
                 "contratos",
                 "movimento",

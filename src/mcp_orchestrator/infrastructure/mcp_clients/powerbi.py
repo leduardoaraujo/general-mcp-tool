@@ -5,6 +5,7 @@ import csv
 import io
 import re
 import unicodedata
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Protocol
 
@@ -131,6 +132,9 @@ class PowerBiMcpClient:
                 if request.policy_decision
                 else None,
                 "raw_result": response.raw_result,
+                "execution_trace": response.structured_content.get("execution_trace")
+                if isinstance(response.structured_content, dict)
+                else None,
             },
         )
 
@@ -154,16 +158,24 @@ class PowerBiMcpClient:
         request: SpecialistExecutionRequest,
     ) -> McpToolCallResponse:
         operations: list[dict[str, Any]] = []
+        execution_trace: list[dict[str, Any]] = []
         local_instances = await caller.call_tool(
             "connection_operations",
             {"request": {"operation": "ListLocalInstances"}},
         )
         operations.append(self._operation_record("connection_operations", local_instances))
+        self._append_execution_trace_step(
+            execution_trace,
+            tool_name="connection_operations",
+            arguments={"request": {"operation": "ListLocalInstances"}},
+            response=local_instances,
+        )
         if local_instances.is_error:
             return self._aggregate_guided_response(
                 is_error=True,
                 summary="Power BI local instance discovery failed.",
                 operations=operations,
+                execution_trace=execution_trace,
             )
 
         instances = self._payload_data(local_instances)
@@ -185,12 +197,24 @@ class PowerBiMcpClient:
             },
         )
         operations.append(self._operation_record("connection_operations", connect))
+        self._append_execution_trace_step(
+            execution_trace,
+            tool_name="connection_operations",
+            arguments={
+                "request": {
+                    "operation": "Connect",
+                    "connectionString": instance.get("connectionString"),
+                }
+            },
+            response=connect,
+        )
         if connect.is_error:
             return self._aggregate_guided_response(
                 is_error=True,
                 summary="Power BI local instance connection failed.",
                 operations=operations,
                 connection=instance,
+                execution_trace=execution_trace,
             )
 
         original_user_request = str(request.enriched_request.original_request)
@@ -212,9 +236,15 @@ class PowerBiMcpClient:
         if self._should_list_tables(original_user_request) or summarize_model:
             tables = await caller.call_tool(
                 "table_operations",
-                {"request": {"operation": "List", "filter": {"maxResults": 200}}},
+                {"request": {"operation": "List", "filter": {"maxResults": 2000}}},
             )
             operations.append(self._operation_record("table_operations", tables))
+            self._append_execution_trace_step(
+                execution_trace,
+                tool_name="table_operations",
+                arguments={"request": {"operation": "List", "filter": {"maxResults": 2000}}},
+                response=tables,
+            )
             guided_data["tables"] = self._payload_data(tables)
 
         if self._should_list_columns(original_user_request):
@@ -226,9 +256,15 @@ class PowerBiMcpClient:
                 if "tables" not in guided_data:
                     tables = await caller.call_tool(
                         "table_operations",
-                        {"request": {"operation": "List", "filter": {"maxResults": 200}}},
+                        {"request": {"operation": "List", "filter": {"maxResults": 2000}}},
                     )
                     operations.append(self._operation_record("table_operations", tables))
+                    self._append_execution_trace_step(
+                        execution_trace,
+                        tool_name="table_operations",
+                        arguments={"request": {"operation": "List", "filter": {"maxResults": 2000}}},
+                        response=tables,
+                    )
                     guided_data["tables"] = self._payload_data(tables)
                 table_names = self._matching_table_names(
                     guided_data.get("tables"),
@@ -247,6 +283,17 @@ class PowerBiMcpClient:
                     },
                 )
                 operations.append(self._operation_record("column_operations", columns))
+                self._append_execution_trace_step(
+                    execution_trace,
+                    tool_name="column_operations",
+                    arguments={
+                        "request": {
+                            "operation": "List",
+                            "filter": {"tableNames": [table_name], "maxResults": 300},
+                        }
+                    },
+                    response=columns,
+                )
                 columns_by_table[table_name] = self._flatten_column_payload(
                     self._payload_data(columns)
                 )
@@ -254,13 +301,25 @@ class PowerBiMcpClient:
                 guided_data["columns"] = columns_by_table
 
         should_execute_measure_query = self._should_execute_measure_query(request)
+        intent_detected = "comparacao" if self._is_comparison_request(original_user_request) else (
+            "ranking" if self._is_ranking_query(original_user_request) else (
+                "valor" if self._is_measure_value_request(original_user_request) else "metadata"
+            )
+        )
+        guided_data["intent_detected"] = intent_detected
 
         if should_execute_measure_query or self._should_list_measures(original_user_request) or summarize_model:
             measures = await caller.call_tool(
                 "measure_operations",
-                {"request": {"operation": "List", "filter": {"maxResults": 200}}},
+                {"request": {"operation": "List", "filter": {"maxResults": 2000}}},
             )
             operations.append(self._operation_record("measure_operations", measures))
+            self._append_execution_trace_step(
+                execution_trace,
+                tool_name="measure_operations",
+                arguments={"request": {"operation": "List", "filter": {"maxResults": 2000}}},
+                response=measures,
+            )
             measure_list = self._payload_data(measures)
             guided_data["measures"] = measure_list
 
@@ -271,10 +330,19 @@ class PowerBiMcpClient:
                     caller,
                     original_user_request,
                     matches,
+                    measure_list if isinstance(measure_list, list) else [],
+                    request.enriched_request.metadata.get("analysis_context")
+                    if isinstance(request.enriched_request.metadata, dict)
+                    else None,
                 )
                 if query_result is not None:
                     operations.append(query_result["operation"])
                     guided_data.update(query_result["guided_data"])
+                    execution_trace.append(query_result["execution_trace"])
+                    guided_data["dax_executed"] = True
+            elif should_execute_measure_query:
+                guided_data["dax_executed"] = False
+                guided_data["reason_if_not_executed"] = "Nenhuma medida compativel foi encontrada para a pergunta."
 
             if matches and self._should_get_measure_definitions(original_user_request):
                 measure_definitions = await caller.call_tool(
@@ -288,6 +356,17 @@ class PowerBiMcpClient:
                 )
                 operations.append(
                     self._operation_record("measure_operations", measure_definitions)
+                )
+                self._append_execution_trace_step(
+                    execution_trace,
+                    tool_name="measure_operations",
+                    arguments={
+                        "request": {
+                            "operation": "Get",
+                            "references": [{"name": measure["name"]} for measure in matches[:5]],
+                        }
+                    },
+                    response=measure_definitions,
                 )
                 guided_data["matching_measures"] = matches
                 guided_data["measure_definitions"] = self._payload_data(measure_definitions)
@@ -303,7 +382,16 @@ class PowerBiMcpClient:
                 {"request": {"operation": "GetStats"}},
             )
             operations.append(self._operation_record("model_operations", stats))
+            self._append_execution_trace_step(
+                execution_trace,
+                tool_name="model_operations",
+                arguments={"request": {"operation": "GetStats"}},
+                response=stats,
+            )
             guided_data["model_stats"] = self._payload_data(stats)
+        elif should_execute_measure_query and "dax_executed" not in guided_data:
+            guided_data["dax_executed"] = False
+            guided_data["reason_if_not_executed"] = "Execucao analitica nao foi disparada."
 
         return self._aggregate_guided_response(
             is_error=any(record["is_error"] for record in operations),
@@ -311,6 +399,7 @@ class PowerBiMcpClient:
             operations=operations,
             connection=instance,
             guided_data=guided_data,
+            execution_trace=execution_trace,
         )
 
     def _aggregate_guided_response(
@@ -321,11 +410,13 @@ class PowerBiMcpClient:
         operations: list[dict[str, Any]],
         connection: dict[str, Any] | None = None,
         guided_data: dict[str, Any] | None = None,
+        execution_trace: list[dict[str, Any]] | None = None,
     ) -> McpToolCallResponse:
         structured_content = {
             "summary": summary,
             "connection": connection,
             "operations": operations,
+            "execution_trace": execution_trace or [],
         }
         if guided_data:
             structured_content.update(guided_data)
@@ -405,12 +496,20 @@ class PowerBiMcpClient:
         caller: Any,
         user_request: str,
         matches: list[dict[str, Any]],
+        all_measures: list[dict[str, Any]],
+        analysis_context: Any,
     ) -> dict[str, Any] | None:
-        measure = self._best_measure_match(matches, user_request)
-        if not measure:
+        intent = "comparacao" if self._is_comparison_request(user_request) else "valor"
+        primary_measure, comparison_measure, comparison_basis = self._resolve_measure_pair(
+            user_request=user_request,
+            matches=matches,
+            all_measures=all_measures,
+            analysis_context=analysis_context,
+        )
+        if not primary_measure:
             return None
 
-        measure_name = measure.get("name")
+        measure_name = primary_measure.get("name")
         if not isinstance(measure_name, str):
             return None
 
@@ -423,9 +522,23 @@ class PowerBiMcpClient:
                 column_name=dimension["column_name"],
                 entity_type=dimension["entity_type"],
             )
+        elif intent == "comparacao" and comparison_measure:
+            comparison_name = comparison_measure.get("name")
+            if not isinstance(comparison_name, str):
+                comparison_name = None
+            if comparison_name:
+                dax_query = self._build_comparison_query(
+                    primary_measure_name=measure_name,
+                    comparison_measure_name=comparison_name,
+                    comparison_basis=comparison_basis,
+                )
+            else:
+                dax_query = f'EVALUATE ROW("MetricValue", [{measure_name}])'
         else:
             dax_query = f'EVALUATE ROW("MetricValue", [{measure_name}])'
 
+        started_at = datetime.now(UTC)
+        started_perf = perf_counter()
         dax_response = await caller.call_tool(
             "dax_query_operations",
             {
@@ -437,13 +550,18 @@ class PowerBiMcpClient:
                 }
             },
         )
+        duration_ms = round((perf_counter() - started_perf) * 1000, 3)
         operation = self._operation_record("dax_query_operations", dax_response)
         rows = self._extract_dax_rows(dax_response)
+        scalar_value = self._extract_scalar_value(rows)
         guided_data: dict[str, Any] = {
             "dax_query_results": {
                 "query": dax_query,
                 "rows": rows,
                 "measure_name": measure_name,
+                "value": scalar_value,
+                "comparison_metric_name": comparison_measure.get("name") if comparison_measure else None,
+                "comparison_basis": comparison_basis,
             }
         }
 
@@ -451,7 +569,311 @@ class PowerBiMcpClient:
         if ranking_analysis:
             guided_data["ranking_analysis"] = ranking_analysis
 
-        return {"operation": operation, "guided_data": guided_data}
+        formatted_value = self._format_numeric_value_for_trace(scalar_value)
+        return {
+            "operation": operation,
+            "guided_data": guided_data,
+            "execution_trace": {
+                "target_mcp": self.target.value,
+                "tool_name": "dax_query_operations",
+                "operation": "Execute",
+                "started_at": started_at.isoformat(),
+                "duration_ms": duration_ms,
+                "status": "error" if dax_response.is_error else "success",
+                "input": {
+                    "query": dax_query,
+                    "maxRows": 20,
+                    "timeoutSeconds": 120,
+                    "matched_measure": measure_name,
+                    "comparison_measure": comparison_measure.get("name") if comparison_measure else None,
+                },
+                "validation": {
+                    "intent_detected": intent,
+                    "matched_measure_found": bool(measure_name),
+                    "ranking_mode": bool(dimension and self._is_ranking_query(user_request)),
+                    "comparison_basis": comparison_basis,
+                    "raw_value_available": scalar_value is not None,
+                },
+                "calculation": {
+                    "raw_value": scalar_value,
+                    "formatted_value": formatted_value,
+                    "format_divergence": scalar_value != formatted_value if scalar_value is not None else False,
+                },
+                "output_summary": self._build_output_summary(rows, scalar_value),
+                "output_sample": rows[:10],
+                "errors": dax_response.content if dax_response.is_error else [],
+                "warnings": [],
+            },
+        }
+
+    def _build_comparison_query(
+        self,
+        *,
+        primary_measure_name: str,
+        comparison_measure_name: str,
+        comparison_basis: str,
+    ) -> str:
+        escaped_basis = comparison_basis.replace('"', '""')
+        escaped_comparison = comparison_measure_name.replace('"', '""')
+        return f"""
+EVALUATE
+ROW(
+    "MetricValue", [{primary_measure_name}],
+    "ComparisonValue", [{comparison_measure_name}],
+    "ComparisonMetricName", "{escaped_comparison}",
+    "ComparisonBasis", "{escaped_basis}",
+    "DeltaValue", [{primary_measure_name}] - [{comparison_measure_name}],
+    "DeltaPercent", DIVIDE([{primary_measure_name}] - [{comparison_measure_name}], [{comparison_measure_name}])
+)
+""".strip()
+
+    def _resolve_measure_pair(
+        self,
+        *,
+        user_request: str,
+        matches: list[dict[str, Any]],
+        all_measures: list[dict[str, Any]],
+        analysis_context: Any,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
+        explicit_measure_name = self._extract_explicit_measure_name(user_request)
+        if explicit_measure_name:
+            strict_primary = self._find_measure_by_explicit_name(all_measures, explicit_measure_name)
+            if strict_primary is None:
+                # Nunca chutar outra medida quando o usuário especificou explicitamente uma medida.
+                return None, None, None
+            primary = strict_primary
+        else:
+            primary = self._best_measure_match(matches, user_request)
+        comparison = None
+        basis = None
+        if not self._is_comparison_request(user_request):
+            return primary, comparison, basis
+
+        normalized_request = self._normalize(user_request)
+        explicit_meta = [
+            item for item in matches
+            if isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and "meta" in self._normalize(item["name"])
+        ]
+        if explicit_meta:
+            comparison = self._best_measure_match(explicit_meta, user_request)
+            basis = "explicit_meta"
+
+        if primary and comparison and primary == comparison:
+            primary = self._infer_primary_from_family(
+                all_measures=all_measures,
+                comparison_measure=comparison,
+                analysis_context=analysis_context,
+            )
+            if primary is None:
+                primary = self._default_primary_for_request(all_measures, normalized_request)
+
+        if primary is None:
+            primary = self._primary_from_context(all_measures, analysis_context)
+        if primary is None:
+            primary = self._default_primary_for_request(all_measures, normalized_request)
+
+        if comparison is None and primary is not None:
+            comparison = self._comparison_from_family(all_measures, primary, normalized_request)
+            if comparison is not None:
+                basis = "inferred_family"
+
+        if comparison is None:
+            comparison = self._comparison_from_context(all_measures, analysis_context)
+            if comparison is not None and basis is None:
+                basis = "explicit_meta"
+
+        return primary, comparison, basis
+
+    def _primary_from_context(self, all_measures: list[dict[str, Any]], analysis_context: Any) -> dict[str, Any] | None:
+        if not isinstance(analysis_context, dict):
+            return None
+        name = analysis_context.get("last_metric_name")
+        return self._find_measure_by_name(all_measures, name)
+
+    def _comparison_from_context(self, all_measures: list[dict[str, Any]], analysis_context: Any) -> dict[str, Any] | None:
+        if not isinstance(analysis_context, dict):
+            return None
+        name = analysis_context.get("last_comparison_metric_name")
+        return self._find_measure_by_name(all_measures, name)
+
+    def _default_primary_for_request(self, all_measures: list[dict[str, Any]], normalized_request: str) -> dict[str, Any] | None:
+        priority = ("vgv vendido", "propostas vgv", "propostas")
+        for wanted in priority:
+            for measure in all_measures:
+                if isinstance(measure, dict) and isinstance(measure.get("name"), str):
+                    if wanted in self._normalize(measure["name"]) and (
+                        "vgv" in normalized_request or wanted == "propostas"
+                    ):
+                        return measure
+        return None
+
+    def _comparison_from_family(
+        self,
+        all_measures: list[dict[str, Any]],
+        primary_measure: dict[str, Any],
+        normalized_request: str,
+    ) -> dict[str, Any] | None:
+        primary_name = str(primary_measure.get("name") or "")
+        family_tokens = [token for token in re.findall(r"[a-z0-9_]+", self._normalize(primary_name)) if len(token) > 2]
+        candidates: list[dict[str, Any]] = []
+        for measure in all_measures:
+            if not isinstance(measure, dict) or not isinstance(measure.get("name"), str):
+                continue
+            normalized_name = self._normalize(measure["name"])
+            if "meta" not in normalized_name:
+                continue
+            if any(token in normalized_name for token in family_tokens) or "vgv" in normalized_request and "vgv" in normalized_name:
+                candidates.append(measure)
+        return self._best_measure_match(candidates, primary_name) if candidates else None
+
+    def _infer_primary_from_family(
+        self,
+        *,
+        all_measures: list[dict[str, Any]],
+        comparison_measure: dict[str, Any],
+        analysis_context: Any,
+    ) -> dict[str, Any] | None:
+        context_primary = self._primary_from_context(all_measures, analysis_context)
+        if context_primary is not None:
+            return context_primary
+        comparison_name = self._normalize(str(comparison_measure.get("name") or ""))
+        tokens = [token for token in re.findall(r"[a-z0-9_]+", comparison_name) if token not in {"meta", "mes", "dia"}]
+        for measure in all_measures:
+            if not isinstance(measure, dict) or not isinstance(measure.get("name"), str):
+                continue
+            normalized_name = self._normalize(measure["name"])
+            if "meta" in normalized_name:
+                continue
+            if any(token in normalized_name for token in tokens):
+                return measure
+        return None
+
+    def _find_measure_by_name(self, all_measures: list[dict[str, Any]], name: Any) -> dict[str, Any] | None:
+        if not isinstance(name, str) or not name.strip():
+            return None
+        normalized_target = self._normalize(name)
+        for measure in all_measures:
+            if isinstance(measure, dict) and isinstance(measure.get("name"), str):
+                if self._normalize(measure["name"]) == normalized_target:
+                    return measure
+        return None
+
+    def _append_execution_trace_step(
+        self,
+        execution_trace: list[dict[str, Any]],
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+        response: McpToolCallResponse,
+    ) -> None:
+        payload = self._payload(response)
+        output_data = self._payload_data(response)
+        output_rows = output_data if isinstance(output_data, list) else []
+        execution_trace.append(
+            {
+                "target_mcp": self.target.value,
+                "tool_name": tool_name,
+                "operation": self._operation_name(arguments),
+                "started_at": datetime.now(UTC).isoformat(),
+                "duration_ms": 0.0,
+                "status": "error" if response.is_error else "success",
+                "input": arguments,
+                "validation": {},
+                "calculation": {},
+                "output_summary": self._generic_output_summary(payload, output_data),
+                "output_sample": output_rows[:10] if isinstance(output_rows, list) else [],
+                "errors": response.content if response.is_error else [],
+                "warnings": [],
+            }
+        )
+
+    def _operation_name(self, arguments: dict[str, Any]) -> str:
+        request = arguments.get("request")
+        if isinstance(request, dict):
+            operation = request.get("operation")
+            if isinstance(operation, str):
+                return operation
+        return "unknown"
+
+    def _generic_output_summary(self, payload: Any, output_data: Any) -> dict[str, Any]:
+        row_count = len(output_data) if isinstance(output_data, list) else (1 if output_data is not None else 0)
+        first_row = output_data[0] if isinstance(output_data, list) and output_data and isinstance(output_data[0], dict) else None
+        return {
+            "row_count": row_count,
+            "primary_value": self._extract_first_row_value(first_row) if first_row else None,
+            "keys": list(first_row.keys())[:8] if first_row else [],
+            "payload_has_results": isinstance(payload, dict) and ("results" in payload or "data" in payload),
+        }
+
+    def _build_output_summary(self, rows: list[dict[str, Any]], scalar_value: Any) -> dict[str, Any]:
+        first_row = rows[0] if rows and isinstance(rows[0], dict) else None
+        return {
+            "row_count": len(rows),
+            "primary_value": scalar_value,
+            "keys": list(first_row.keys())[:8] if first_row else [],
+        }
+
+    def _extract_first_row_value(self, row: dict[str, Any]) -> Any:
+        if not isinstance(row, dict):
+            return None
+        for key in ("value", "Value", "Valor", "MetricValue", "[MetricValue]"):
+            if key in row and row.get(key) not in (None, ""):
+                return row.get(key)
+        for row_value in row.values():
+            if row_value not in (None, ""):
+                return row_value
+        return None
+
+    def _format_numeric_value_for_trace(self, value: Any) -> str | Any:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return self._format_pt_br_number(float(value), decimals=0 if float(value).is_integer() else 2)
+        if isinstance(value, str):
+            parsed = self._parse_number_like(value)
+            if parsed is None:
+                return value
+            return self._format_pt_br_number(parsed, decimals=0 if parsed.is_integer() else 2)
+        return value
+
+    def _parse_number_like(self, text: str) -> float | None:
+        candidate = str(text).replace(" ", "")
+        if not re.fullmatch(r"[-+]?[0-9][0-9.,]*", candidate):
+            return None
+        if "," in candidate and "." in candidate:
+            normalized = candidate.replace(".", "").replace(",", ".") if candidate.rfind(",") > candidate.rfind(".") else candidate.replace(",", "")
+        elif "," in candidate:
+            if candidate.count(",") > 1:
+                normalized = candidate.replace(",", "")
+            else:
+                normalized = candidate.replace(",", ".")
+        elif "." in candidate and candidate.count(".") > 1:
+            normalized = candidate.replace(".", "")
+        else:
+            normalized = candidate
+        try:
+            return float(normalized)
+        except ValueError:
+            return None
+
+    def _format_pt_br_number(self, value: float, *, decimals: int) -> str:
+        formatted = f"{value:,.{decimals}f}"
+        return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def _extract_scalar_value(self, rows: list[dict[str, Any]]) -> Any:
+        if not rows or not isinstance(rows[0], dict):
+            return None
+        first_row = rows[0]
+        preferred_keys = ("value", "Value", "Valor", "MetricValue", "[MetricValue]")
+        for key in preferred_keys:
+            if key in first_row and first_row.get(key) not in (None, ""):
+                return first_row.get(key)
+        for _, row_value in first_row.items():
+            if row_value not in (None, ""):
+                return row_value
+        return None
 
     def _operation_record(
         self,
@@ -624,10 +1046,12 @@ class PowerBiMcpClient:
             return None
 
         normalized_request = self._normalize(user_request)
+        request_tokens = set(self._search_tokens(user_request))
         ranked = sorted(
             measures,
             key=lambda measure: (
                 not self._normalize(str(measure.get("name", ""))) in normalized_request,
+                -self._token_overlap_score(str(measure.get("name", "")), request_tokens),
                 "filtro 2" in self._normalize(str(measure.get("name", ""))),
                 len(str(measure.get("name", ""))),
             ),
@@ -638,10 +1062,50 @@ class PowerBiMcpClient:
         self,
         request: SpecialistExecutionRequest,
     ) -> bool:
+        user_request = request.enriched_request.original_request
         return (
             request.enriched_request.understanding.task_type == TaskType.MEASURE_VALUE_QUERY
+            or self._is_measure_value_request(user_request)
+            or self._is_comparison_request(user_request)
             or self._is_ranking_query(request.enriched_request.original_request)
         )
+
+    def _is_measure_value_request(self, user_request: str) -> bool:
+        normalized = self._normalize(user_request)
+        asks_value = any(
+            token in normalized
+            for token in {
+                "qual o numero",
+                "qual numero",
+                "numero da",
+                "numero de",
+                "quanto",
+                "valor da",
+                "valor de",
+                "retorna",
+                "resultado",
+                "margem",
+                "percentual",
+                "%",
+            }
+        )
+        references_measure = any(
+            token in normalized
+            for token in {"medida", "measure", "meta", "vgv", "propostas", "margem", "gop", "%", "percentual"}
+        )
+        return asks_value and references_measure
+
+    def _is_comparison_request(self, user_request: str) -> bool:
+        normalized = self._normalize(user_request)
+        asks_comparison = any(
+            token in normalized
+            for token in {"compar", "versus", " vs ", "meta", "atingimento", "diferenca", "%"}
+        )
+        references_measure = any(
+            token in normalized
+            for token in {"vgv", "meta", "medida", "measure", "propostas", "vendido"}
+        )
+        return asks_comparison and references_measure
 
     def _is_ranking_query(self, user_request: str) -> bool:
         normalized = self._normalize(user_request)
@@ -847,6 +1311,67 @@ SELECTCOLUMNS(
                 if phrase:
                     return phrase
         return None
+
+    def _extract_explicit_measure_name(self, user_request: str) -> str | None:
+        phrase = self._quoted_or_after_measure_phrase(user_request)
+        if not phrase:
+            return None
+        phrase = phrase.split(",")[0].strip()
+        phrase = re.sub(r"^(de|da|do|das|dos)\s+", "", phrase, flags=re.IGNORECASE)
+        cleaned = re.split(
+            r"\b(para|pra|com|usando|use|usar|verifica|verificar|valida|validar|por favor|qual|quanto|valor|numero|retorna|resultado)\b",
+            phrase,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip(" .,!?:;")
+        if not cleaned:
+            return None
+        token_count = len(re.findall(r"[a-z0-9_]+", self._normalize(cleaned)))
+        return cleaned if token_count >= 1 else None
+
+    def _find_measure_by_explicit_name(
+        self,
+        all_measures: list[dict[str, Any]],
+        explicit_name: str,
+    ) -> dict[str, Any] | None:
+        if not explicit_name:
+            return None
+        normalized_explicit = self._normalize(explicit_name)
+        stop_tokens = {
+            "de", "da", "do", "das", "dos", "qual", "quanto", "valor", "numero",
+            "retorna", "resultado", "medida", "measure", "usar", "use", "pra", "para", "com",
+        }
+        explicit_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9_]+", normalized_explicit)
+            if token not in stop_tokens and len(token) >= 2
+        }
+        for measure in all_measures:
+            if not isinstance(measure, dict) or not isinstance(measure.get("name"), str):
+                continue
+            measure_name = str(measure["name"])
+            normalized_name = self._normalize(measure_name)
+            if normalized_name == normalized_explicit:
+                return measure
+        for measure in all_measures:
+            if not isinstance(measure, dict) or not isinstance(measure.get("name"), str):
+                continue
+            normalized_name = self._normalize(str(measure["name"]))
+            if normalized_explicit in normalized_name or normalized_name in normalized_explicit:
+                return measure
+        for measure in all_measures:
+            if not isinstance(measure, dict) or not isinstance(measure.get("name"), str):
+                continue
+            name_tokens = set(re.findall(r"[a-z0-9_]+", self._normalize(str(measure["name"]))))
+            if explicit_tokens and explicit_tokens.issubset(name_tokens):
+                return measure
+        return None
+
+    def _token_overlap_score(self, measure_name: str, request_tokens: set[str]) -> int:
+        if not request_tokens:
+            return 0
+        measure_tokens = set(re.findall(r"[a-z0-9_]+", self._normalize(measure_name)))
+        return len(request_tokens & measure_tokens)
 
     def _flatten_column_payload(self, payload: Any) -> Any:
         if not isinstance(payload, list):

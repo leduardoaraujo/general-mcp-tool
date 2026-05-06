@@ -209,6 +209,7 @@ class ChatResponse(BaseModel):
     confirmation_id: str | None = None
     sources_used: list[str] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
+    presentation: dict[str, Any] | None = None
 
 
 class McpToolDefinition(BaseModel):

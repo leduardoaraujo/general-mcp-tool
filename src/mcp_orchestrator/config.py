@@ -16,6 +16,8 @@ class Settings:
     intelligence_mode: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-5-mini"
+    groq_api_key: str | None = None
+    groq_model: str = "llama-3.1-8b-instant"
 
     def resolved_project_dir(self) -> Path:
         return Path(os.getenv("MCP_ORCHESTRATOR_PROJECT_DIR", self.project_dir)).resolve()
@@ -53,3 +55,9 @@ class Settings:
 
     def resolved_openai_model(self) -> str:
         return os.getenv("OPENAI_MODEL") or self.openai_model
+
+    def resolved_groq_api_key(self) -> str | None:
+        return os.getenv("GROQ_API_KEY") or self.groq_api_key
+
+    def resolved_groq_model(self) -> str:
+        return os.getenv("GROQ_MODEL") or self.groq_model

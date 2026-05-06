@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +13,14 @@ from .application import create_orchestration_service
 from .config import Settings
 
 
+def _load_project_env() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    env_path = project_root / ".env"
+    load_dotenv(dotenv_path=env_path, override=False)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
+    _load_project_env()
     service = create_orchestration_service(settings or Settings())
     app = FastAPI(title="MCP Orchestrator", version="0.1.0")
     app.state.orchestration_service = service

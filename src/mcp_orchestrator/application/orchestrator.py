@@ -159,6 +159,11 @@ class OrchestrationService:
         trace = trace_recorder.complete()
         response.debug["orchestration_trace"] = trace.model_dump(mode="json")
         response.debug["confirmation_id"] = policy_decision.confirmation_id
+        execution_trace_raw = self._collect_execution_trace(response)
+        response.debug["execution_trace_raw"] = execution_trace_raw
+        response.debug["execution_trace_sections"] = self._build_execution_trace_sections(
+            execution_trace_raw
+        )
         self._record_audit(
             request=request,
             understanding=understanding,
@@ -177,6 +182,8 @@ class OrchestrationService:
             tags=request.tags,
             metadata=request.metadata,
         )
+        if self.chat_answer_service:
+            user_request = self.chat_answer_service.enrich_request(user_request)
         orchestration = await self.orchestrate(user_request)
         if self.chat_answer_service:
             return self.chat_answer_service.compose(user_request, orchestration)
@@ -321,6 +328,78 @@ class OrchestrationService:
             response=response,
         )
 
+    def _collect_execution_trace(self, response: NormalizedResponse) -> list[dict[str, object]]:
+        steps: list[dict[str, object]] = []
+        for result in response.specialist_results:
+            debug = result.debug if isinstance(result.debug, dict) else {}
+            trace_steps = debug.get("execution_trace")
+            if isinstance(trace_steps, list):
+                for step in trace_steps:
+                    if isinstance(step, dict):
+                        steps.append(step)
+        return steps
+
+    def _build_execution_trace_sections(
+        self,
+        steps: list[dict[str, object]],
+    ) -> dict[str, list[dict[str, object]]]:
+        executed: list[dict[str, object]] = []
+        validation: list[dict[str, object]] = []
+        calculation: list[dict[str, object]] = []
+        result: list[dict[str, object]] = []
+
+        for step in steps:
+            executed.append(
+                {
+                    "target_mcp": step.get("target_mcp"),
+                    "tool_name": step.get("tool_name"),
+                    "operation": step.get("operation"),
+                    "status": step.get("status"),
+                    "started_at": step.get("started_at"),
+                    "duration_ms": step.get("duration_ms"),
+                }
+            )
+            validation.append(
+                {
+                    "tool_name": step.get("tool_name"),
+                    "operation": step.get("operation"),
+                    "validation": step.get("validation") or {},
+                    "errors": step.get("errors") or [],
+                    "warnings": step.get("warnings") or [],
+                }
+            )
+            calculation.append(
+                {
+                    "tool_name": step.get("tool_name"),
+                    "operation": step.get("operation"),
+                    "calculation": step.get("calculation") or {},
+                }
+            )
+            result.append(
+                {
+                    "tool_name": step.get("tool_name"),
+                    "operation": step.get("operation"),
+                    "output_summary": step.get("output_summary") or {},
+                    "output_sample": step.get("output_sample") or [],
+                }
+            )
+
+        if not steps:
+            calculation.append(
+                {
+                    "tool_name": None,
+                    "operation": None,
+                    "calculation": {"note": "nao houve execucao de medida"},
+                }
+            )
+
+        return {
+            "executado": executed,
+            "validacao": validation,
+            "calculo": calculation,
+            "resultado": result,
+        }
+
 
 def create_orchestration_service(settings: Settings | None = None) -> OrchestrationService:
     settings = settings or Settings()
@@ -350,6 +429,8 @@ def create_orchestration_service(settings: Settings | None = None) -> Orchestrat
         chat_answer_service=ChatAnswerService(
             api_key=settings.resolved_openai_api_key(),
             model=settings.resolved_openai_model(),
+            groq_api_key=settings.resolved_groq_api_key(),
+            groq_model=settings.resolved_groq_model(),
         ),
     )
 
