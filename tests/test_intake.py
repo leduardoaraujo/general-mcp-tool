@@ -51,6 +51,21 @@ def test_power_bi_dax_request_is_dax_query() -> None:
     assert result.requested_action == RequestedAction.GENERATE_QUERY
 
 
+def test_power_bi_ranking_question_is_measure_value_query() -> None:
+    interpreter = HeuristicRequestInterpreter()
+
+    result = interpreter.interpret(
+        OrchestrateRequest(
+            message="verifica pra mim se o THIAGO MORAES BARBOSA e o liner com mais proposta vgv",
+            domain_hint="power_bi",
+        )
+    )
+
+    assert result.candidate_mcps == [McpTarget.POWER_BI]
+    assert result.task_type == TaskType.MEASURE_VALUE_QUERY
+    assert result.requested_action == RequestedAction.EXECUTE_QUERY
+
+
 def test_power_bi_refresh_request_is_high_risk() -> None:
     interpreter = HeuristicRequestInterpreter()
 

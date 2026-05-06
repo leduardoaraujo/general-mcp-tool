@@ -46,7 +46,9 @@ def test_power_bi_request_builds_semantic_execution_plan() -> None:
     plan = router.create_plan(enriched, policy)
 
     assert plan.target_mcps == [McpTarget.POWER_BI]
-    assert plan.execution_mode == ExecutionMode.PREVIEW_ONLY
+    assert plan.execution_mode == ExecutionMode.SIMPLE
+    assert plan.policy_decision is policy
+    assert plan.policy_decision.allow_execution is True
     assert plan.tool_hints[McpTarget.POWER_BI] == "run_guided_modeling_request"
 
 

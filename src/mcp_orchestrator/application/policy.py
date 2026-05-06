@@ -24,7 +24,11 @@ class DefaultExecutionPolicyService:
             RequestedAction.READ,
             RequestedAction.INSPECT_SCHEMA,
             RequestedAction.INSPECT_MODEL,
+            RequestedAction.EXECUTE_QUERY,
         }
+
+        if self._should_auto_allow_read_execution(enriched_request, read_only):
+            return self._auto_read_execution_decision(enriched_request)
 
         if write or side_effects or action == RequestedAction.REFRESH:
             return self._blocked_decision(enriched_request, write=write, side_effects=side_effects)
@@ -86,6 +90,27 @@ class DefaultExecutionPolicyService:
             trace=["Execution policy allowed read-only execution."],
         )
 
+    def _auto_read_execution_decision(
+        self,
+        enriched_request: EnrichedRequest,
+    ) -> ExecutionPolicyDecision:
+        return ExecutionPolicyDecision(
+            correlation_id=enriched_request.correlation_id,
+            preview_only=False,
+            read_only=True,
+            write=False,
+            side_effects=False,
+            requires_confirmation=False,
+            allow_execution=True,
+            blocked_reason=None,
+            confirmation_id=None,
+            safety_level=SafetyLevel.SAFE,
+            risk_level=RiskLevel.LOW,
+            decision_reason="Safe Power BI read-only execution is allowed by default.",
+            warnings=["Power BI read-only validation executed directly."],
+            trace=["Execution policy allowed safe Power BI read-only execution."],
+        )
+
     def _blocked_decision(
         self,
         enriched_request: EnrichedRequest,
@@ -116,3 +141,20 @@ class DefaultExecutionPolicyService:
         text = enriched_request.original_request.lower()
         side_effect_terms = ("send", "email", "publish", "refresh", "deploy")
         return any(term in text for term in side_effect_terms)
+
+    def _should_auto_allow_read_execution(
+        self,
+        enriched_request: EnrichedRequest,
+        read_only: bool,
+    ) -> bool:
+        if not read_only:
+            return False
+        if enriched_request.understanding.domain != "power_bi":
+            return False
+        if "Do not execute external operations." in enriched_request.constraints:
+            return False
+        return enriched_request.understanding.task_type in {
+            "semantic_model_query",
+            "semantic_model_inspection",
+            "measure_value_query",
+        }

@@ -100,6 +100,8 @@ class FakeSessionCaller:
                     {"name": "Custo Unitário Prato"},
                     {"name": "Custo Unitário do Prato (KPI)"},
                     {"name": "Total Custo"},
+                    {"name": "Propostas VGV"},
+                    {"name": "Propostas VGV Filtro 2"},
                 ],
             },
             ("measure_operations", "Get"): {
@@ -117,6 +119,29 @@ class FakeSessionCaller:
                 ],
             },
         }
+        if tool_name == "dax_query_operations" and operation == "Execute":
+            csv_text = (
+                "EntityType,EntityName,MeasureName,MetricValue,MetricRank,TopEntityName,TopMetricValue,IsTopEntity\r\n"
+                "liner,THIAGO MORAES BARBOSA,Propostas VGV,\"22720675,050000004\",160,"
+                "KESLEY MARTINS COSTA,\"260592604,18999854\",False\r\n"
+            )
+            return McpToolCallResponse(
+                server_name="power_bi",
+                tool_name=tool_name,
+                is_error=False,
+                content=['{"success":true}'],
+                structured_content=None,
+                raw_result={
+                    "content": [
+                        {"type": "text", "text": '{"success":true}'},
+                        {
+                            "type": "resource",
+                            "resource": {"mimeType": "text/csv", "text": csv_text},
+                        },
+                    ]
+                },
+            )
+
         payload = payloads[(tool_name, operation)]
         return McpToolCallResponse(
             server_name="power_bi",
@@ -197,16 +222,16 @@ def test_power_bi_capabilities_describe_semantic_support() -> None:
     assert capabilities.default_tool == "run_guided_modeling_request"
 
 
-def test_router_builds_power_bi_semantic_preview_request() -> None:
+def test_router_builds_power_bi_semantic_read_request() -> None:
     specialist_request = build_power_bi_specialist_request()
 
     assert specialist_request.target == McpTarget.POWER_BI
     assert specialist_request.tool_name == "run_guided_modeling_request"
-    assert specialist_request.arguments["preview_only"] is True
+    assert specialist_request.arguments["preview_only"] is False
     assert specialist_request.arguments["allow_write"] is False
     assert "Power BI semantic-model response" in str(specialist_request.arguments["request"])
     assert specialist_request.policy_decision is not None
-    assert specialist_request.policy_decision.preview_only is True
+    assert specialist_request.policy_decision.allow_execution is True
 
 
 def test_router_builds_power_bi_dax_preview_request() -> None:
@@ -264,6 +289,32 @@ async def test_power_bi_client_guided_request_uses_real_power_bi_tools_in_one_se
     assert "DIVIDE([Custo Realizado], [Porções Prato])" in result.summary
     assert result.structured_data["connection"]["parentWindowTitle"] == "Planejamentov12"
     assert result.structured_data["measure_definitions"][0]["name"] == "Custo Unitário Prato"
+
+
+@pytest.mark.asyncio
+async def test_power_bi_client_executes_ranking_validation_query() -> None:
+    runner = FakeSessionRunner()
+    client = PowerBiMcpClient(
+        server_catalog=FakeCatalog(),
+        tool_runner=runner,
+    )  # type: ignore[arg-type]
+    request = build_power_bi_specialist_request(
+        message="verifica pra mim se o THIAGO MORAES BARBOSA e o liner com mais proposta vgv por favor",
+    )
+
+    result = await client.execute(request)
+
+    assert result.status == ResultStatus.SUCCESS
+    assert [call[0] for call in runner.calls] == [
+        "connection_operations",
+        "connection_operations",
+        "measure_operations",
+        "dax_query_operations",
+    ]
+    assert "THIAGO MORAES BARBOSA is not the top liner" in result.summary
+    assert result.structured_data["ranking_analysis"]["entity_name"] == "THIAGO MORAES BARBOSA"
+    assert result.structured_data["ranking_analysis"]["top_entity_name"] == "KESLEY MARTINS COSTA"
+    assert result.structured_data["ranking_analysis"]["entity_rank"] == 160
 
 
 @pytest.mark.asyncio

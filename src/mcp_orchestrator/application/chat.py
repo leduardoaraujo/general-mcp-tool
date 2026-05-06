@@ -144,12 +144,15 @@ class ChatAnswerService:
             power_bi_data = orchestration.structured_data.get("power_bi")
         if not isinstance(power_bi_data, dict):
             return None
+
+        ranking_message = self._ranking_query_message(power_bi_data)
+        if ranking_message:
+            return ranking_message
         
         # Check if we have DAX query results
         dax_results = power_bi_data.get("dax_query_results")
         if not dax_results:
-            # Try to generate a helpful message if we have the measure info
-            return self._generate_value_query_preview(request, power_bi_data)
+            return None
         
         # Format the actual results
         return self._format_dax_results(request, dax_results, power_bi_data)
@@ -259,6 +262,42 @@ class ChatAnswerService:
             if title:
                 lines.append(f"Relatório: {title}")
         
+        return "\n".join(lines)
+
+    def _ranking_query_message(self, power_bi_data: dict[str, Any]) -> str | None:
+        ranking = power_bi_data.get("ranking_analysis")
+        if not isinstance(ranking, dict):
+            return None
+
+        entity_name = ranking.get("entity_name")
+        entity_type = ranking.get("entity_type")
+        measure_name = ranking.get("measure_name")
+        entity_value = ranking.get("entity_value")
+        entity_rank = ranking.get("entity_rank")
+        top_entity_name = ranking.get("top_entity_name")
+        top_entity_value = ranking.get("top_entity_value")
+        is_top_entity = ranking.get("is_top_entity")
+        if not entity_name or not entity_type or not measure_name:
+            return None
+
+        if is_top_entity is True:
+            lines = [
+                f"{entity_name} e o {entity_type} com maior {measure_name}.",
+                f"Valor: {entity_value}.",
+            ]
+        else:
+            lines = [
+                f"{entity_name} nao e o {entity_type} com maior {measure_name}.",
+                f"{top_entity_name} lidera com {top_entity_value}.",
+            ]
+            if entity_rank:
+                lines.append(f"{entity_name} esta na posicao {entity_rank} com {entity_value}.")
+
+        connection = power_bi_data.get("connection")
+        if isinstance(connection, dict):
+            title = connection.get("parentWindowTitle")
+            if title:
+                lines.append(f"Relatorio Power BI aberto: {title}.")
         return "\n".join(lines)
 
     def _power_bi_message(

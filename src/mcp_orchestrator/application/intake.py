@@ -33,15 +33,57 @@ class HeuristicRequestUnderstandingService:
     excel_terms = ("excel", "xlsx", "spreadsheet", "worksheet", "planilha")
     docs_terms = ("documentation", "docs", "manual", "playbook", "documentacao")
     preview_terms = ("preview", "prepare", "generate", "safe sql", "do not execute")
-    read_terms = ("show", "list", "find", "query", "select", "read", "inspect")
+    read_terms = (
+        "show",
+        "list",
+        "find",
+        "query",
+        "select",
+        "read",
+        "inspect",
+        "verifica",
+        "verifique",
+        "valida",
+        "valide",
+        "compare",
+    )
     write_terms = ("insert", "update", "delete", "drop", "create", "alter", "truncate", "modify", "rename")
     side_effect_terms = ("send", "email", "publish", "refresh", "deploy", "execute")
     # New: terms indicating user wants actual numeric values, not metadata
     value_query_terms = (
-        "quantos", "quanto", "how many", "how much", "total", "qual", "what",
-        "qual foi", "qual é", "qual o", "quanto foi", "quanto é",
-        "em fevereiro", "em janeiro", "em", "during", "em 2026", "2026",
-        "fevereiro de", "janeiro de", "março de", "mês", "month", "ano", "year",
+        "quantos",
+        "quanto",
+        "how many",
+        "how much",
+        "total",
+        "qual",
+        "what",
+        "qual foi",
+        "qual é",
+        "qual o",
+        "quanto foi",
+        "quanto é",
+        "em fevereiro",
+        "em janeiro",
+        "em",
+        "during",
+        "em 2026",
+        "2026",
+        "fevereiro de",
+        "janeiro de",
+        "março de",
+        "mês",
+        "month",
+        "ano",
+        "year",
+        "mais",
+        "maior",
+        "top",
+        "ranking",
+        "lider",
+        "lidera",
+        "verifica",
+        "validar",
     )
 
     def understand(self, request: UserRequest) -> RequestUnderstanding:
@@ -131,9 +173,47 @@ class HeuristicRequestUnderstandingService:
         Detect if user is asking for actual measure values, not just metadata.
         Patterns: "quantos X eu tive", "qual foi o total", "total de X", etc.
         """
+        if self._contains_any(
+            text,
+            (
+                "semantic model",
+                "modelo semantico",
+                "modelo semântico",
+                "metadata",
+                "medida que mostra",
+                "qual a medida",
+                "qual medida",
+                "definicao",
+                "definição",
+                "formula",
+                "fórmula",
+            ),
+        ):
+            return False
+
         # Check for value query terms combined with measure-like words
         has_value_term = self._contains_any(text, self.value_query_terms)
-        has_measure_term = self._contains_any(text, ("medida", "valor", "total", "saldo", "contratos", "movimento", "movimentacao", "distrato"))
+        has_measure_term = self._contains_any(
+            text,
+            (
+                "medida",
+                "valor",
+                "total",
+                "saldo",
+                "contratos",
+                "movimento",
+                "movimentacao",
+                "distrato",
+                "proposta",
+                "propostas",
+                "vgv",
+                "liner",
+                "closer",
+                "captador",
+                "promotor",
+                "lider",
+            ),
+        )
         
         return has_value_term and has_measure_term
 

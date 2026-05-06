@@ -8,8 +8,13 @@ from mcp_orchestrator.domain.enums import SafetyLevel
 from mcp_orchestrator.domain.models import RetrievedContext, UserRequest
 
 
-def build_enriched(message: str, metadata: dict[str, object] | None = None):
-    request = UserRequest(message=message, domain_hint="postgresql", metadata=metadata or {})
+def build_enriched(
+    message: str,
+    metadata: dict[str, object] | None = None,
+    *,
+    domain_hint: str = "postgresql",
+):
+    request = UserRequest(message=message, domain_hint=domain_hint, metadata=metadata or {})
     understanding = HeuristicRequestInterpreter().understand(request)
     return DefaultContextComposer().compose(
         "cid",
@@ -83,3 +88,19 @@ def test_policy_blocks_write_requests() -> None:
     assert decision.allow_execution is False
     assert decision.safety_level == SafetyLevel.BLOCKED
     assert decision.blocked_reason
+
+
+def test_policy_auto_allows_safe_power_bi_read_execution() -> None:
+    enriched = build_enriched(
+        "verifica se THIAGO MORAES BARBOSA e o liner com mais proposta vgv",
+        domain_hint="power_bi",
+    )
+    trace = OrchestrationTraceRecorder("cid").trace
+
+    decision = DefaultExecutionPolicyService().decide(enriched, trace)
+
+    assert decision.preview_only is False
+    assert decision.read_only is True
+    assert decision.allow_execution is True
+    assert decision.safety_level == SafetyLevel.SAFE
+    assert decision.confirmation_id is None

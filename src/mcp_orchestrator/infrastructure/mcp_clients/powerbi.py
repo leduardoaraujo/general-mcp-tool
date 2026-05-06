@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import csv
+import io
 import re
 import unicodedata
 from time import perf_counter
@@ -251,7 +253,9 @@ class PowerBiMcpClient:
             if columns_by_table:
                 guided_data["columns"] = columns_by_table
 
-        if self._should_list_measures(original_user_request) or summarize_model:
+        should_execute_measure_query = self._should_execute_measure_query(request)
+
+        if should_execute_measure_query or self._should_list_measures(original_user_request) or summarize_model:
             measures = await caller.call_tool(
                 "measure_operations",
                 {"request": {"operation": "List", "filter": {"maxResults": 200}}},
@@ -261,6 +265,17 @@ class PowerBiMcpClient:
             guided_data["measures"] = measure_list
 
             matches = self._matching_measures(measure_list, original_user_request)
+            if matches and should_execute_measure_query:
+                guided_data["matching_measures"] = matches
+                query_result = await self._execute_measure_query(
+                    caller,
+                    original_user_request,
+                    matches,
+                )
+                if query_result is not None:
+                    operations.append(query_result["operation"])
+                    guided_data.update(query_result["guided_data"])
+
             if matches and self._should_get_measure_definitions(original_user_request):
                 measure_definitions = await caller.call_tool(
                     "measure_operations",
@@ -324,6 +339,34 @@ class PowerBiMcpClient:
         )
 
     def _guided_summary(self, guided_data: dict[str, Any]) -> str:
+        ranking_analysis = guided_data.get("ranking_analysis")
+        if isinstance(ranking_analysis, dict):
+            entity_name = ranking_analysis.get("entity_name")
+            entity_type = ranking_analysis.get("entity_type")
+            measure_name = ranking_analysis.get("measure_name")
+            entity_value = ranking_analysis.get("entity_value")
+            entity_rank = ranking_analysis.get("entity_rank")
+            top_entity_name = ranking_analysis.get("top_entity_name")
+            top_entity_value = ranking_analysis.get("top_entity_value")
+            is_top_entity = ranking_analysis.get("is_top_entity")
+            if is_top_entity is True:
+                return (
+                    f"{entity_name} is the top {entity_type} for {measure_name} "
+                    f"with {entity_value}."
+                )
+            if entity_name and top_entity_name:
+                return (
+                    f"{entity_name} is not the top {entity_type} for {measure_name}. "
+                    f"{top_entity_name} leads with {top_entity_value}; "
+                    f"{entity_name} is ranked {entity_rank} with {entity_value}."
+                )
+
+        dax_query_results = guided_data.get("dax_query_results")
+        if isinstance(dax_query_results, dict):
+            rows = dax_query_results.get("rows")
+            if isinstance(rows, list) and rows:
+                return "Executed Power BI DAX validation successfully."
+
         columns = guided_data.get("columns")
         if isinstance(columns, dict) and columns:
             table_name, table_columns = next(iter(columns.items()))
@@ -356,6 +399,59 @@ class PowerBiMcpClient:
         if isinstance(stats, dict):
             return "Retrieved Power BI semantic model statistics."
         return "Completed safe Power BI semantic-model inspection."
+
+    async def _execute_measure_query(
+        self,
+        caller: Any,
+        user_request: str,
+        matches: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        measure = self._best_measure_match(matches, user_request)
+        if not measure:
+            return None
+
+        measure_name = measure.get("name")
+        if not isinstance(measure_name, str):
+            return None
+
+        dimension = self._ranking_dimension(user_request)
+        if dimension and self._is_ranking_query(user_request):
+            dax_query = self._build_ranking_validation_query(
+                user_request=user_request,
+                measure_name=measure_name,
+                table_name=dimension["table_name"],
+                column_name=dimension["column_name"],
+                entity_type=dimension["entity_type"],
+            )
+        else:
+            dax_query = f'EVALUATE ROW("MetricValue", [{measure_name}])'
+
+        dax_response = await caller.call_tool(
+            "dax_query_operations",
+            {
+                "request": {
+                    "operation": "Execute",
+                    "query": dax_query,
+                    "maxRows": 20,
+                    "timeoutSeconds": 120,
+                }
+            },
+        )
+        operation = self._operation_record("dax_query_operations", dax_response)
+        rows = self._extract_dax_rows(dax_response)
+        guided_data: dict[str, Any] = {
+            "dax_query_results": {
+                "query": dax_query,
+                "rows": rows,
+                "measure_name": measure_name,
+            }
+        }
+
+        ranking_analysis = self._build_ranking_analysis(rows, measure_name)
+        if ranking_analysis:
+            guided_data["ranking_analysis"] = ranking_analysis
+
+        return {"operation": operation, "guided_data": guided_data}
 
     def _operation_record(
         self,
@@ -519,6 +615,216 @@ class PowerBiMcpClient:
             ),
         )
 
+    def _best_measure_match(
+        self,
+        measures: list[dict[str, Any]],
+        user_request: str,
+    ) -> dict[str, Any] | None:
+        if not measures:
+            return None
+
+        normalized_request = self._normalize(user_request)
+        ranked = sorted(
+            measures,
+            key=lambda measure: (
+                not self._normalize(str(measure.get("name", ""))) in normalized_request,
+                "filtro 2" in self._normalize(str(measure.get("name", ""))),
+                len(str(measure.get("name", ""))),
+            ),
+        )
+        return ranked[0]
+
+    def _should_execute_measure_query(
+        self,
+        request: SpecialistExecutionRequest,
+    ) -> bool:
+        return (
+            request.enriched_request.understanding.task_type == TaskType.MEASURE_VALUE_QUERY
+            or self._is_ranking_query(request.enriched_request.original_request)
+        )
+
+    def _is_ranking_query(self, user_request: str) -> bool:
+        normalized = self._normalize(user_request)
+        return any(
+            token in normalized
+            for token in {"mais", "maior", "top", "ranking", "lider", "lidera"}
+        )
+
+    def _ranking_dimension(self, user_request: str) -> dict[str, str] | None:
+        normalized = self._normalize(user_request)
+        dimensions = (
+            {
+                "keyword": "liner",
+                "entity_type": "liner",
+                "table_name": "comercial casal_responsaveis",
+                "column_name": "liner",
+            },
+            {
+                "keyword": "closer",
+                "entity_type": "closer",
+                "table_name": "comercial casal_responsaveis",
+                "column_name": "closer",
+            },
+            {
+                "keyword": "captador",
+                "entity_type": "captador",
+                "table_name": "comercial casal_responsaveis",
+                "column_name": "captador",
+            },
+            {
+                "keyword": "promotor",
+                "entity_type": "promotor",
+                "table_name": "comercial casal_responsaveis",
+                "column_name": "promotor",
+            },
+        )
+        for dimension in dimensions:
+            if dimension["keyword"] in normalized:
+                return dimension
+        return None
+
+    def _build_ranking_validation_query(
+        self,
+        *,
+        user_request: str,
+        measure_name: str,
+        table_name: str,
+        column_name: str,
+        entity_type: str,
+    ) -> str:
+        entity_name = self._extract_entity_name(user_request, entity_type)
+        column_ref = f"'{table_name}'[{column_name}]"
+        escaped_entity_name = self._escape_dax_string(entity_name or "")
+
+        return f"""
+EVALUATE
+VAR SummaryBase =
+    FILTER(
+        SUMMARIZECOLUMNS(
+            {column_ref},
+            "MetricValue", [{measure_name}]
+        ),
+        NOT ISBLANK({column_ref}) && NOT ISBLANK([MetricValue])
+    )
+VAR Ranked =
+    ADDCOLUMNS(
+        SummaryBase,
+        "MetricRank", RANKX(SummaryBase, [MetricValue],, DESC, Dense)
+    )
+VAR TopEntity =
+    TOPN(1, Ranked, [MetricValue], DESC, {column_ref}, ASC)
+VAR SelectedEntity =
+    FILTER(
+        Ranked,
+        UPPER(TRIM({column_ref})) = "{escaped_entity_name}"
+    )
+RETURN
+SELECTCOLUMNS(
+    SelectedEntity,
+    "EntityType", "{entity_type}",
+    "EntityName", {column_ref},
+    "MeasureName", "{measure_name}",
+    "MetricValue", [MetricValue],
+    "MetricRank", [MetricRank],
+    "TopEntityName", MAXX(TopEntity, {column_ref}),
+    "TopMetricValue", MAXX(TopEntity, [MetricValue]),
+    "IsTopEntity", IF([MetricRank] = 1, TRUE(), FALSE())
+)
+""".strip()
+
+    def _extract_entity_name(self, user_request: str, entity_type: str) -> str | None:
+        normalized = self._normalize(user_request)
+        pattern = re.compile(
+            rf"se\s+o?\s*(.+?)\s+\S+\s+o\s+{re.escape(entity_type)}",
+            re.IGNORECASE,
+        )
+        match = pattern.search(normalized)
+        if match:
+            return match.group(1).strip(" ?.!:,;").upper()
+
+        fallback = re.compile(
+            rf"o?\s*(.+?)\s+\S+\s+o\s+{re.escape(entity_type)}",
+            re.IGNORECASE,
+        )
+        match = fallback.search(normalized)
+        if match:
+            return match.group(1).strip(" ?.!:,;").upper()
+        return None
+
+    def _escape_dax_string(self, value: str) -> str:
+        return value.replace('"', '""').upper().strip()
+
+    def _extract_dax_rows(self, response: McpToolCallResponse) -> list[dict[str, Any]]:
+        csv_text = self._extract_csv_text(response)
+        if not csv_text:
+            return []
+        reader = csv.DictReader(io.StringIO(csv_text))
+        return [dict(row) for row in reader]
+
+    def _extract_csv_text(self, response: McpToolCallResponse) -> str | None:
+        raw_content = response.raw_result.get("content")
+        if isinstance(raw_content, list):
+            for item in raw_content:
+                if not isinstance(item, dict):
+                    continue
+                resource = item.get("resource")
+                if isinstance(resource, dict) and isinstance(resource.get("text"), str):
+                    return resource["text"]
+        for content in response.content:
+            if isinstance(content, str) and "," in content and "\n" in content:
+                return content
+        return None
+
+    def _build_ranking_analysis(
+        self,
+        rows: list[dict[str, Any]],
+        measure_name: str,
+    ) -> dict[str, Any] | None:
+        if not rows:
+            return None
+
+        row = self._normalize_row_keys(rows[0])
+        entity_name = row.get("EntityName")
+        top_entity_name = row.get("TopEntityName")
+        if not entity_name or not top_entity_name:
+            return None
+
+        return {
+            "entity_type": row.get("EntityType"),
+            "entity_name": entity_name,
+            "measure_name": row.get("MeasureName") or measure_name,
+            "entity_value": row.get("MetricValue"),
+            "entity_rank": self._parse_int(row.get("MetricRank")),
+            "top_entity_name": top_entity_name,
+            "top_entity_value": row.get("TopMetricValue"),
+            "is_top_entity": self._parse_bool(row.get("IsTopEntity")),
+        }
+
+    def _normalize_row_keys(self, row: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in row.items():
+            clean_key = str(key).strip().strip("[]")
+            normalized[clean_key] = value
+        return normalized
+
+    def _parse_int(self, value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(str(value))
+        except ValueError:
+            return None
+
+    def _parse_bool(self, value: Any) -> bool | None:
+        if value is None:
+            return None
+        normalized = self._normalize(str(value))
+        if normalized in {"true", "1"}:
+            return True
+        if normalized in {"false", "0"}:
+            return False
+        return None
+
     def _measure_search_text(self, measure: dict[str, Any]) -> str:
         values = [
             measure.get("name"),
@@ -600,6 +906,25 @@ class PowerBiMcpClient:
             "falam",
             "fala",
             "sobre",
+            "por",
+            "pra",
+            "favor",
+            "mim",
+            "com",
+            "verifica",
+            "verifique",
+            "valida",
+            "validar",
+            "mais",
+            "maior",
+            "top",
+            "ranking",
+            "lider",
+            "lidera",
+            "liner",
+            "closer",
+            "captador",
+            "promotor",
             "modelo",
             "relatorio",
             "power",
@@ -626,6 +951,12 @@ class PowerBiMcpClient:
             "context",
         }
         normalized = self._normalize(user_request)
+        dimension = self._ranking_dimension(user_request)
+        if dimension:
+            entity_name = self._extract_entity_name(user_request, dimension["entity_type"])
+            if entity_name:
+                for token in re.findall(r"[a-z0-9_]+", self._normalize(entity_name)):
+                    normalized = normalized.replace(token, " ")
         tokens = re.findall(r"[a-z0-9_]+", normalized)
         return [
             token

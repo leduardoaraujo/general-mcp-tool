@@ -98,6 +98,7 @@ Current behavior:
 - Power BI semantic model requests route to `PowerBiMcpClient`
 - DAX requests route to `PowerBiMcpClient`
 - metadata, table, and measure listing requests route to `PowerBiMcpClient`
+- ranking and measure validation questions should execute safe read-only DAX when the user is asking to validate a real business answer
 - refresh and model mutation requests are blocked before specialist execution
 - relational SQL requests continue routing to PostgreSQL or SQL Server
 
@@ -110,6 +111,7 @@ Safe by default:
 - table listing
 - measure listing
 - DAX preview/generation
+- DAX validation and safe read-only execution for Power BI business questions
 
 Blocked by default:
 

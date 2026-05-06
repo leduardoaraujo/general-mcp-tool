@@ -218,3 +218,40 @@ def test_chat_fallback_lists_power_bi_columns_and_measure_definitions() -> None:
 
     assert "Colunas da tabela PJs (2): Contrato, Status." in chat.message
     assert "- Total Contratos (Medidas): COUNTROWS(PJs)" in chat.message
+
+
+def test_chat_fallback_formats_power_bi_ranking_validation() -> None:
+    response = NormalizedResponse(
+        correlation_id="cid",
+        status=ResultStatus.SUCCESS,
+        summary="Executed Power BI DAX validation successfully.",
+        specialist_results=[],
+        structured_data={
+            "power_bi": {
+                "connection": {
+                    "parentWindowTitle": "Top_Atual2",
+                    "parentProcessName": "PBIDesktop",
+                    "port": 59167,
+                },
+                "ranking_analysis": {
+                    "entity_type": "liner",
+                    "entity_name": "THIAGO MORAES BARBOSA",
+                    "measure_name": "Propostas VGV",
+                    "entity_value": "22720675,050000004",
+                    "entity_rank": 160,
+                    "top_entity_name": "KESLEY MARTINS COSTA",
+                    "top_entity_value": "260592604,18999854",
+                    "is_top_entity": False,
+                },
+            }
+        },
+    )
+
+    chat = ChatAnswerService(api_key=None, model="fallback").compose(
+        request=UserRequest(message="verifica se THIAGO MORAES BARBOSA e o liner com mais proposta vgv"),
+        orchestration=response,
+    )
+
+    assert "THIAGO MORAES BARBOSA nao e o liner com maior Propostas VGV." in chat.message
+    assert "KESLEY MARTINS COSTA lidera com 260592604,18999854." in chat.message
+    assert "Relatorio Power BI aberto: Top_Atual2." in chat.message

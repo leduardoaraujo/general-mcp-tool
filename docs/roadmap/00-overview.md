@@ -128,6 +128,19 @@ Responsavel por transformar respostas heterogeneas em um contrato unico de respo
 - rastreabilidade completa das decisoes
 - documentacao operacional desde o inicio
 
+## Diferencial do Piloto
+
+No escopo GAV, o maior diferencial do produto nao e apenas listar metadados ou sugerir consultas.
+
+O ponto central e validar logicas analiticas no contexto real de uso:
+
+- validar DAX contra o modelo aberto no Power BI
+- responder perguntas analiticas diretamente sobre medidas, ranking e comparativos
+- cruzar medida, contexto e resultado sem expor credenciais ao usuario final
+- manter tudo em fluxo governado, auditavel e somente leitura quando aplicavel
+
+Para o piloto, isso precisa existir como capacidade executavel do produto, e nao apenas como diretriz de documentacao.
+
 ## Nao Objetivos
 
 Este projeto nao implementa nesta fase:
